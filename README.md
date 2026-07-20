@@ -1,5 +1,8 @@
 # diffmeter
 
+[![CI](https://github.com/claytonlin1110/diffmeter/actions/workflows/ci.yml/badge.svg)](https://github.com/claytonlin1110/diffmeter/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **How much of this diff is actually code?**
 
 `diffmeter` scores a git diff by parsing the before/after AST of every
@@ -48,11 +51,7 @@ general-purpose diff-quality tool that happens to be useful there too.
 
 ## Install
 
-```
-pip install diffmeter
-```
-
-Or from source:
+Not yet published to PyPI — install from source for now:
 
 ```
 git clone https://github.com/claytonlin1110/diffmeter.git
@@ -103,7 +102,7 @@ diffmeter score --base origin/main --min-score 30
 # .github/workflows/diffmeter.yml
 - name: Check diff substance
   run: |
-    pip install diffmeter
+    pip install git+https://github.com/claytonlin1110/diffmeter.git
     diffmeter score --base origin/${{ github.base_ref }} --min-score 30
 ```
 
