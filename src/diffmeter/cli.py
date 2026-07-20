@@ -109,6 +109,7 @@ def _print_json(diff_score: DiffScore) -> None:
                 "added_trivial": r.added_trivial,
                 "removed_total": r.removed_total,
                 "removed_trivial": r.removed_trivial,
+                "moved": r.moved,
                 "score": r.score,
                 "note": r.note,
             }
@@ -139,6 +140,8 @@ def _print_table(diff_score: DiffScore) -> None:
     click.echo(f"Overall substance score: {overall_str}")
     if any(r.heuristic for r in diff_score.files):
         click.echo("(* = no grammar available for this file type; used a best-effort heuristic)")
+    if diff_score.moved:
+        click.echo(f"({diff_score.moved} line(s) across the diff look moved rather than newly written)")
 
 
 if __name__ == "__main__":

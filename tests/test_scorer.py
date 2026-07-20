@@ -98,3 +98,68 @@ def test_score_diff_with_no_files_has_no_overall_score():
     result = score_diff([])
     assert result.files == []
     assert result.overall_score is None
+
+
+def test_pure_reorder_is_detected_as_moved_not_new():
+    base = (
+        b"def f():\n"
+        b"    a = compute_something()\n"
+        b"    b = another_call()\n"
+        b"    return a + b\n"
+    )
+    head = (
+        b"def f():\n"
+        b"    b = another_call()\n"
+        b"    a = compute_something()\n"
+        b"    return a + b\n"
+    )
+    result = score_file("f.py", base, head)
+    assert result.moved > 0
+    assert result.score == 0.0
+    assert "moved" in result.note
+
+
+def test_genuinely_new_line_is_not_treated_as_moved():
+    base = b"def f():\n    a = compute_something()\n    return a\n"
+    head = b"def f():\n    a = compute_something()\n    b = brand_new_call()\n    return a + b\n"
+    result = score_file("f.py", base, head)
+    assert result.moved == 0
+    assert result.score == 100.0
+
+
+def test_short_identical_lines_are_not_falsely_matched_as_moved():
+    # `}` (and other short, extremely common lines) shouldn't be treated as
+    # "moved" just because an identical short line exists on both sides --
+    # that would silently deflate scores for unrelated real changes.
+    base = b"function f() {\n    return 1;\n}\n"
+    head = b"function f() {\n    return 2;\n}\n"
+    result = score_file("f.js", base, head)
+    assert result.moved == 0
+    assert result.score == 100.0
+
+
+def test_moved_line_and_genuine_change_are_distinguished_in_the_same_file():
+    base = (
+        b"def f():\n"
+        b"    unique_helper_call_xyz()\n"
+        b"    x = 1\n"
+        b"    y = 2\n"
+        b"    return x + y\n"
+    )
+    head = (
+        b"def f():\n"
+        b"    x = 1\n"
+        b"    y = 3\n"
+        b"    return x + y\n"
+        b"    unique_helper_call_xyz()\n"
+    )
+    result = score_file("f.py", base, head)
+    # unique_helper_call_xyz() (24 chars) is long enough to be matched as moved;
+    # x = 1 (5 chars) is identical on both sides too but falls below
+    # _MIN_MOVE_MATCH_CHARS, so it's *not* caught -- a known, deliberate
+    # trade-off to avoid false-positive matches on short lines elsewhere.
+    assert result.moved == 2
+    assert result.added_trivial == 1
+    assert result.removed_trivial == 1
+    # y = 2 -> y = 3 is a genuine change and must still count as substantive.
+    assert result.score == 66.7

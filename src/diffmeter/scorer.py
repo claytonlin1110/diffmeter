@@ -9,6 +9,14 @@ The score is: (changed lines that are substantive) / (all changed lines),
 computed separately for additions (checked against the new file's AST) and
 deletions (checked against the old file's AST) so that deleting real logic
 counts the same as adding it.
+
+On top of that, lines that look substantive in isolation but are an exact
+content match for a line on the other side of the diff (added and removed
+in the same file) are treated as *moved* rather than newly written -- this
+catches reordering without needing a full AST tree-diff. See
+`_find_moved_lines` for the matching rule and its limits (same-file only,
+exact normalized match, a minimum length to avoid matching on stray `}` or
+`else:` lines).
 """
 
 from __future__ import annotations
@@ -22,6 +30,7 @@ from diffmeter.languages import FALLBACK_MARKERS, detect_language, get_parser
 
 _BINARY_MARKER = b"\x00"
 _BINARY_SNIFF_BYTES = 8192
+_MIN_MOVE_MATCH_CHARS = 8
 
 
 class Verdict(str, Enum):
@@ -40,6 +49,7 @@ class FileScore:
     added_trivial: int = 0
     removed_total: int = 0
     removed_trivial: int = 0
+    moved: int = 0
     note: Optional[str] = None
 
     @property
@@ -63,6 +73,10 @@ class FileScore:
 @dataclass
 class DiffScore:
     files: list[FileScore] = field(default_factory=list)
+
+    @property
+    def moved(self) -> int:
+        return sum(f.moved for f in self.files)
 
     @property
     def changed_total(self) -> int:
@@ -131,6 +145,54 @@ def _diff_line_numbers(
     return added, removed
 
 
+def _movable_lines_by_content(
+    lines: list[bytes], line_numbers: set[int], verdicts: dict[int, Verdict]
+) -> dict[str, list[int]]:
+    """Group changed line numbers by normalized (stripped) content, restricted
+    to lines that are substantive on their own and long enough that a match
+    is unlikely to be coincidental. Short lines like `}` or `else:` are
+    excluded on purpose -- matching those would flag unrelated lines as
+    "moved" just because they're common, silently deflating the score."""
+    by_content: dict[str, list[int]] = {}
+    for ln in sorted(line_numbers):
+        if verdicts.get(ln) != Verdict.SUBSTANTIVE:
+            continue
+        content = lines[ln - 1].strip().decode("utf-8", errors="replace")
+        if len(content) < _MIN_MOVE_MATCH_CHARS:
+            continue
+        by_content.setdefault(content, []).append(ln)
+    return by_content
+
+
+def _find_moved_lines(
+    base_lines: list[bytes],
+    head_lines: list[bytes],
+    removed: set[int],
+    added: set[int],
+    base_verdicts: dict[int, Verdict],
+    head_verdicts: dict[int, Verdict],
+) -> tuple[set[int], set[int]]:
+    """Lines that look substantive in isolation but are an exact
+    (whitespace-normalized) content match for a line removed/added elsewhere
+    in the same file's diff -- i.e. code that moved rather than code that's
+    new. Matched by content, not position, so this catches reordering, not
+    just reformatting. Limits: same file only (no cross-file move
+    detection), and only lines meeting `_MIN_MOVE_MATCH_CHARS`."""
+    removed_by_content = _movable_lines_by_content(base_lines, removed, base_verdicts)
+    added_by_content = _movable_lines_by_content(head_lines, added, head_verdicts)
+
+    moved_removed: set[int] = set()
+    moved_added: set[int] = set()
+    for content, removed_lines in removed_by_content.items():
+        added_lines = added_by_content.get(content)
+        if not added_lines:
+            continue
+        n = min(len(removed_lines), len(added_lines))
+        moved_removed.update(removed_lines[:n])
+        moved_added.update(added_lines[:n])
+    return moved_removed, moved_added
+
+
 def score_file(
     path: str, base_content: Optional[bytes], head_content: Optional[bytes]
 ) -> FileScore:
@@ -146,8 +208,14 @@ def score_file(
     if is_binary:
         result.note = "binary file, excluded from scoring"
         return result
+
+    notes = []
     if heuristic:
-        result.note = f"no grammar for '{language}', used comment-prefix heuristic" if language else "unrecognized file type, used comment-prefix heuristic"
+        notes.append(
+            f"no grammar for '{language}', used comment-prefix heuristic"
+            if language
+            else "unrecognized file type, used comment-prefix heuristic"
+        )
 
     norm_base = _normalize(base_content) if base_content is not None else None
     norm_head = _normalize(head_content) if head_content is not None else None
@@ -161,19 +229,35 @@ def score_file(
     else:
         added, removed = _diff_line_numbers(base_lines, head_lines)
 
+    head_verdicts: dict[int, Verdict] = {}
+    base_verdicts: dict[int, Verdict] = {}
+
     if added:
-        verdicts = _classify_lines(head_content, language)
+        head_verdicts = _classify_lines(head_content, language)
         result.added_total = len(added)
         result.added_trivial = sum(
-            1 for ln in added if verdicts.get(ln) in (Verdict.TRIVIAL, Verdict.BLANK)
+            1 for ln in added if head_verdicts.get(ln) in (Verdict.TRIVIAL, Verdict.BLANK)
         )
 
     if removed:
-        verdicts = _classify_lines(base_content, language)
+        base_verdicts = _classify_lines(base_content, language)
         result.removed_total = len(removed)
         result.removed_trivial = sum(
-            1 for ln in removed if verdicts.get(ln) in (Verdict.TRIVIAL, Verdict.BLANK)
+            1 for ln in removed if base_verdicts.get(ln) in (Verdict.TRIVIAL, Verdict.BLANK)
         )
+
+    if added and removed:
+        moved_removed, moved_added = _find_moved_lines(
+            base_lines, head_lines, removed, added, base_verdicts, head_verdicts
+        )
+        result.moved = len(moved_added) + len(moved_removed)
+        result.added_trivial += len(moved_added)
+        result.removed_trivial += len(moved_removed)
+        if result.moved:
+            notes.append(f"{result.moved} line(s) look moved rather than newly written")
+
+    if notes:
+        result.note = "; ".join(notes)
 
     return result
 

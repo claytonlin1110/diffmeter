@@ -62,12 +62,15 @@ test case.
 
 Noted here so effort isn't duplicated:
 
-- **Structural diffing.** The scorer currently line-diffs old vs. new
-  content (`difflib`) and classifies each changed line independently. A
-  real tree-diff (matching AST nodes across the edit rather than lines)
-  would handle reformatting/reordering more accurately, at the cost of
-  meaningfully more complexity. Worth doing once the simpler approach's
-  limits are actually felt in practice, not before.
+- **Full structural (AST tree) diffing.** The scorer line-diffs old vs.
+  new content (`difflib`) and classifies each changed line independently;
+  `_find_moved_lines` in `scorer.py` layers on same-file, exact-content
+  move detection to catch pure reordering, but that's a content-matching
+  heuristic, not a real tree-diff. It won't catch a moved block whose
+  formatting also changed, or a move across two files. A real tree-diff
+  (matching AST nodes across the edit, e.g. GumTree-style) would handle
+  both, at the cost of meaningfully more complexity. Worth doing once the
+  simpler approach's limits are actually felt in practice, not before.
 - **Per-language weighting.** Right now every substantive line counts
   equally regardless of language. Some scoring use cases may want to
   weight, e.g., generated files or config-language changes differently

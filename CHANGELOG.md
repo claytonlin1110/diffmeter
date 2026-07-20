@@ -3,6 +3,30 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-07-20
+
+### Added
+
+- Move detection: a line that looks substantive on its own is now checked
+  against the rest of the same file's diff for an exact
+  (whitespace-normalized) content match on the other side. A matched line
+  is scored as moved rather than newly written, so a pure reorder of code
+  now scores near 0 instead of the 100 it would have gotten from
+  classifying each line independently. New `moved` field on `FileScore`/
+  `DiffScore` and in the `--json` output; surfaced as a note in the table
+  output too.
+- Matching is restricted to lines of at least 8 characters (stripped) to
+  avoid false-positive matches on short, common lines like `}` or
+  `else:` — see `_MIN_MOVE_MATCH_CHARS` in `scorer.py`. This is a
+  documented, deliberate trade-off (false negatives on short moved lines
+  are preferred over false positives on coincidental short matches).
+
+### Notes
+
+- This is content-matching within a single file, not a full AST tree-diff:
+  it doesn't catch cross-file moves or a moved block whose formatting also
+  changed. A real tree-diff remains on the roadmap (see CONTRIBUTING.md).
+
 ## [0.2.0] - 2026-07-20
 
 ### Added
