@@ -92,14 +92,43 @@ Machine-readable output for scripting:
 diffmeter score --json
 ```
 
+Score a GitHub pull request directly — no local clone needed:
+
+```
+diffmeter score --pr owner/repo#123
+diffmeter score --pr https://github.com/owner/repo/pull/123
+```
+
+Set `GITHUB_TOKEN` (or `GH_TOKEN`) in the environment to avoid GitHub's low
+unauthenticated API rate limit.
+
 Gate a CI job on it — fail the build if a PR is (say) more than 70% trivial:
 
 ```
 diffmeter score --base origin/main --min-score 30
 ```
 
+### In GitHub Actions
+
 ```yaml
 # .github/workflows/diffmeter.yml
+on: pull_request
+jobs:
+  diffmeter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # diffmeter needs history to diff against the base branch
+      - uses: claytonlin1110/diffmeter@v0.2.0
+        with:
+          base: origin/${{ github.base_ref }}
+          min-score: 30
+```
+
+Or without the action, in any CI system:
+
+```yaml
 - name: Check diff substance
   run: |
     pip install git+https://github.com/claytonlin1110/diffmeter.git
@@ -109,7 +138,7 @@ diffmeter score --base origin/main --min-score 30
 ### As a library
 
 ```python
-from diffmeter import score_diff
+from diffmeter import score_diff, score_pull_request, parse_pr_reference
 
 pairs = [
     ("app.py", old_bytes, new_bytes),   # (path, base_content, head_content)
@@ -118,6 +147,9 @@ result = score_diff(pairs)
 print(result.overall_score)   # 0-100, or None if nothing changed
 for f in result.files:
     print(f.path, f.language, f.score)
+
+# Or score a live GitHub PR directly:
+result = score_pull_request(parse_pr_reference("owner/repo#123"))
 ```
 
 ## How it works

@@ -9,6 +9,7 @@ import click
 
 from diffmeter import __version__
 from diffmeter.git_utils import GitError, changed_files, is_git_repo, resolve_side
+from diffmeter.github_pr import GitHubError, parse_pr_reference, score_pull_request
 from diffmeter.scorer import DiffScore, FileScore, score_file
 
 
@@ -40,31 +41,49 @@ def main() -> None:
     help="Exit with status 1 if the overall score is below this threshold (0-100). "
     "Useful as a CI gate against comment-only or whitespace-only PRs.",
 )
+@click.option(
+    "--pr",
+    "pr_ref",
+    default=None,
+    help="Score a GitHub pull request instead of a local diff: owner/repo#123 or a full PR "
+    "URL. No local clone needed. Set GITHUB_TOKEN (or GH_TOKEN) to avoid GitHub's low "
+    "unauthenticated rate limit. Ignores PATH/--base/--head.",
+)
 def score(
     path: Path,
     base: str,
     head: Optional[str],
     as_json: bool,
     min_score: Optional[float],
+    pr_ref: Optional[str],
 ) -> None:
     """Score the diff between BASE and HEAD (default: working tree vs HEAD)
     in the repository at PATH (default: current directory)."""
-    repo = path.resolve()
-    if not is_git_repo(repo):
-        raise click.ClickException(f"{repo} is not inside a git repository")
+    if pr_ref is not None:
+        try:
+            ref = parse_pr_reference(pr_ref)
+            diff_score = score_pull_request(ref)
+        except ValueError as exc:
+            raise click.ClickException(str(exc))
+        except GitHubError as exc:
+            raise click.ClickException(str(exc))
+    else:
+        repo = path.resolve()
+        if not is_git_repo(repo):
+            raise click.ClickException(f"{repo} is not inside a git repository")
 
-    try:
-        files = changed_files(repo, base, head)
-    except GitError as exc:
-        raise click.ClickException(str(exc))
+        try:
+            files = changed_files(repo, base, head)
+        except GitError as exc:
+            raise click.ClickException(str(exc))
 
-    results: list[FileScore] = []
-    for cf in files:
-        base_content = resolve_side(repo, base, cf.base_path)
-        head_content = resolve_side(repo, head, cf.head_path)
-        results.append(score_file(cf.display_path, base_content, head_content))
+        results: list[FileScore] = []
+        for cf in files:
+            base_content = resolve_side(repo, base, cf.base_path)
+            head_content = resolve_side(repo, head, cf.head_path)
+            results.append(score_file(cf.display_path, base_content, head_content))
 
-    diff_score = DiffScore(files=results)
+        diff_score = DiffScore(files=results)
 
     if as_json:
         _print_json(diff_score)

@@ -1,0 +1,49 @@
+name: "diffmeter"
+description: "Score how much of a diff is real logic vs. comments/formatting, and optionally fail the job if it's below a threshold."
+author: "Clayton Lin"
+branding:
+  icon: "git-pull-request"
+  color: "purple"
+
+inputs:
+  path:
+    description: "Path to the repository to score."
+    required: false
+    default: "."
+  base:
+    description: "Base revision to compare against."
+    required: false
+    default: "HEAD"
+  head:
+    description: "Head revision to compare. Leave unset to score uncommitted changes against `base`."
+    required: false
+    default: ""
+  min-score:
+    description: "Fail the job if the overall score (0-100) is below this. Leave unset to only report."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install diffmeter
+      shell: bash
+      run: pip install "${{ github.action_path }}"
+
+    - name: Run diffmeter
+      shell: bash
+      run: |
+        set -e
+        args=("${{ inputs.path }}" "--base" "${{ inputs.base }}")
+        if [ -n "${{ inputs.head }}" ]; then
+          args+=("--head" "${{ inputs.head }}")
+        fi
+        if [ -n "${{ inputs.min-score }}" ]; then
+          args+=("--min-score" "${{ inputs.min-score }}")
+        fi
+        diffmeter score "${args[@]}"

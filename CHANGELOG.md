@@ -3,6 +3,26 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] - 2026-07-20
+
+### Added
+
+- `diffmeter score --pr owner/repo#123` (or a full PR URL): scores a GitHub
+  pull request directly via the GitHub API, with no local clone required.
+  Honors `GITHUB_TOKEN`/`GH_TOKEN` to avoid the low unauthenticated rate
+  limit. Also available as a library function, `score_pull_request`.
+- A composite GitHub Action (`action.yml`) so other repositories can add
+  diffmeter as a CI check in one step: `uses: claytonlin1110/diffmeter@v0.2.0`.
+
+### Fixed
+
+- `previous_filename` handling for the PR-scoring code path: GitHub's API
+  returns this key as present-but-`null` for non-renamed files, not
+  omitted, so `dict.get(key, default)` was silently passing `None` through
+  instead of falling back — meaning ordinary (non-renamed) modified files
+  in a PR would have crashed. Caught before release by checking the real
+  API response shape, not just mocked tests.
+
 ## [0.1.0] - 2026-07-20
 
 Initial release.
