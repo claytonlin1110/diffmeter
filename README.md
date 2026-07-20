@@ -59,7 +59,7 @@ cd diffmeter
 pip install -e .
 ```
 
-Requires Python 3.9+. The only real dependencies are
+Requires Python 3.10+. The only real dependencies are
 [`tree-sitter-language-pack`](https://pypi.org/project/tree-sitter-language-pack/)
 (precompiled grammars for 300+ languages, no compiler needed at install
 time) and `click`.

@@ -9,7 +9,7 @@ description = "Measure how much of a diff is real logic vs. comments, formatting
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Clayton Lin" }]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = ["git", "diff", "ast", "tree-sitter", "code-review", "pull-request"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -17,7 +17,6 @@ classifiers = [
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
