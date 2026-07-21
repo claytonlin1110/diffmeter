@@ -100,6 +100,25 @@ def test_score_diff_with_no_files_has_no_overall_score():
     assert result.overall_score is None
 
 
+def test_score_diff_preserves_input_order_under_concurrency():
+    # Enough files that a thread pool genuinely interleaves their completion
+    # order; results must still come back in input order regardless of
+    # which finishes first (pool.map's contract, but worth locking in).
+    pairs = [(f"file_{i}.py", b"x = 1\n", f"x = {i}\n".encode()) for i in range(20)]
+    result = score_diff(pairs, max_workers=8)
+    assert [f.path for f in result.files] == [f"file_{i}.py" for i in range(20)]
+
+
+def test_score_diff_max_workers_one_matches_default_concurrency_result():
+    pairs = [
+        ("a.py", b"x = 1\n", b"x = 1\n# comment\n"),
+        ("b.py", b"y = 1\n", b"y = 2\n"),
+    ]
+    sequential = score_diff(pairs, max_workers=1)
+    concurrent = score_diff(pairs, max_workers=4)
+    assert [f.score for f in sequential.files] == [f.score for f in concurrent.files]
+
+
 def test_pure_reorder_is_detected_as_moved_not_new():
     base = (
         b"def f():\n"

@@ -3,6 +3,33 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.0] - 2026-07-21
+
+### Added
+
+- Concurrent scoring: files are scored in parallel via a thread pool by
+  default (`--jobs 8`, `-j`; `--jobs 1` disables it). Biggest win in `--pr`
+  mode, where the cost is almost entirely network round-trips to GitHub --
+  measured 25s -> 7s on a real 10-file PR (`pallets/click#3704`), with
+  byte-identical output between sequential and concurrent runs. Local
+  scoring is parallelized too (mostly `git show` subprocess overhead).
+- `score_diff()` and `score_pull_request()` both take an optional
+  `max_workers` parameter for library callers.
+
+### Fixed
+
+- Real thread-safety hazard, fixed *before* it could bite anyone: the
+  tree-sitter `Parser` cache in `languages.py` was a single process-wide
+  `@lru_cache`, meaning every thread would share and call `.parse()` on
+  the *same* Parser object -- tree-sitter Parsers aren't documented as
+  safe for concurrent use like that, which would have meant intermittent
+  corruption or crashes once concurrency landed. Switched to a
+  thread-local cache (confirmed the underlying library hands back a fresh
+  Parser object per call, so this is both correct and still avoids
+  reconstructing one per file). Locked in with a test that forces two
+  distinct OS threads and asserts they get different Parser instances,
+  rather than relying on timing to expose a race.
+
 ## [0.4.0] - 2026-07-20
 
 ### Added

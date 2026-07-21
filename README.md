@@ -102,6 +102,16 @@ diffmeter score --pr https://github.com/owner/repo/pull/123
 Set `GITHUB_TOKEN` (or `GH_TOKEN`) in the environment to avoid GitHub's low
 unauthenticated API rate limit.
 
+Files are scored concurrently by default (`--jobs 8`; `--jobs 1` disables
+it) — on a real 10-file PR (`pallets/click#3704`) this took `--pr` scoring
+from 25s to 7s with identical output, since the cost there is almost
+entirely network round-trips to GitHub, not CPU. Local scoring benefits
+too, just less dramatically (mostly `git show` subprocess overhead).
+
+```
+diffmeter score --pr owner/repo#123 --jobs 16
+```
+
 Gate a CI job on it — fail the build if a PR is (say) more than 70% trivial:
 
 ```

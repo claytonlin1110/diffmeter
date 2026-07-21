@@ -9,13 +9,14 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Optional
 
 import pathspec
 
 from diffmeter.config import is_ignored
-from diffmeter.scorer import DiffScore, score_file
+from diffmeter.scorer import DiffScore, FileScore, score_file
 
 _API_ROOT = "https://api.github.com"
 _RAW_ROOT = "https://raw.githubusercontent.com"
@@ -98,27 +99,51 @@ def _fetch_blob(owner: str, repo: str, sha: str, path: str) -> Optional[bytes]:
         raise GitHubError(f"Could not reach raw.githubusercontent.com: {exc.reason}") from exc
 
 
-def score_pull_request(ref: PullRequestRef, matcher: Optional[pathspec.PathSpec] = None) -> DiffScore:
+def _score_pr_entry(
+    ref: PullRequestRef,
+    base_sha: str,
+    head_sha: str,
+    entry: dict,
+    matcher: Optional[pathspec.PathSpec],
+) -> FileScore:
+    status = entry["status"]  # "added" | "removed" | "modified" | "renamed" | "copied" | "changed"
+    path = entry["filename"]
+
+    if is_ignored(path, matcher):
+        return score_file(path, None, None, ignored=True)
+
+    previous_path = entry.get("previous_filename") or path
+    base_content = None if status == "added" else _fetch_blob(ref.owner, ref.repo, base_sha, previous_path)
+    head_content = None if status == "removed" else _fetch_blob(ref.owner, ref.repo, head_sha, path)
+    return score_file(path, base_content, head_content)
+
+
+def score_pull_request(
+    ref: PullRequestRef,
+    matcher: Optional[pathspec.PathSpec] = None,
+    max_workers: Optional[int] = 8,
+) -> DiffScore:
     """`matcher` (see diffmeter.config.build_matcher) excludes matching paths
     from scoring without fetching their blob content -- there's no local
     checkout to read a .diffmeter.toml from in this mode, so patterns must
-    be passed in explicitly by the caller."""
+    be passed in explicitly by the caller.
+
+    Per-file blob fetching and scoring runs concurrently (max_workers
+    threads, default 8): this is dominated by network round-trips to
+    raw.githubusercontent.com, not CPU, so a PR touching many files no
+    longer pays for each file serially. Pass max_workers=1 to disable.
+    """
     pr = _get_json(f"{_API_ROOT}/repos/{ref.owner}/{ref.repo}/pulls/{ref.number}")
     base_sha = pr["base"]["sha"]
     head_sha = pr["head"]["sha"]
 
-    results = []
-    for f in _fetch_pr_files(ref):
-        status = f["status"]  # "added" | "removed" | "modified" | "renamed" | "copied" | "changed"
-        path = f["filename"]
-
-        if is_ignored(path, matcher):
-            results.append(score_file(path, None, None, ignored=True))
-            continue
-
-        previous_path = f.get("previous_filename") or path
-        base_content = None if status == "added" else _fetch_blob(ref.owner, ref.repo, base_sha, previous_path)
-        head_content = None if status == "removed" else _fetch_blob(ref.owner, ref.repo, head_sha, path)
-        results.append(score_file(path, base_content, head_content))
+    entries = _fetch_pr_files(ref)
+    if max_workers == 1 or len(entries) <= 1:
+        results = [_score_pr_entry(ref, base_sha, head_sha, e, matcher) for e in entries]
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            results = list(
+                pool.map(lambda e: _score_pr_entry(ref, base_sha, head_sha, e, matcher), entries)
+            )
 
     return DiffScore(files=results)

@@ -4,7 +4,7 @@ from diffmeter.config import ConfigError, DiffmeterConfig, build_matcher, is_ign
 from diffmeter.github_pr import GitHubError, PullRequestRef, parse_pr_reference, score_pull_request
 from diffmeter.scorer import DiffScore, FileScore, Verdict, score_diff, score_file
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "ConfigError",

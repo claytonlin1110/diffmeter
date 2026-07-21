@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json as json_module
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -9,7 +10,7 @@ import click
 
 from diffmeter import __version__
 from diffmeter.config import ConfigError, build_matcher, is_ignored, load_config
-from diffmeter.git_utils import GitError, changed_files, is_git_repo, resolve_side
+from diffmeter.git_utils import ChangedFile, GitError, changed_files, is_git_repo, resolve_side
 from diffmeter.github_pr import GitHubError, parse_pr_reference, score_pull_request
 from diffmeter.scorer import DiffScore, FileScore, score_file
 
@@ -60,6 +61,15 @@ def main() -> None:
     "patterns from a .diffmeter.toml `ignore` list in the repo root; --pr mode only "
     "sees patterns passed explicitly here, since there's no local checkout to read.",
 )
+@click.option(
+    "--jobs",
+    "-j",
+    type=int,
+    default=8,
+    show_default=True,
+    help="Score up to this many files concurrently. Set to 1 to disable concurrency "
+    "(useful if you need fully deterministic timing, e.g. profiling).",
+)
 def score(
     path: Path,
     base: str,
@@ -68,6 +78,7 @@ def score(
     min_score: Optional[float],
     pr_ref: Optional[str],
     ignore_patterns: tuple[str, ...],
+    jobs: int,
 ) -> None:
     """Score the diff between BASE and HEAD (default: working tree vs HEAD)
     in the repository at PATH (default: current directory)."""
@@ -75,7 +86,7 @@ def score(
         try:
             ref = parse_pr_reference(pr_ref)
             matcher = build_matcher(list(ignore_patterns))
-            diff_score = score_pull_request(ref, matcher=matcher)
+            diff_score = score_pull_request(ref, matcher=matcher, max_workers=jobs)
         except ValueError as exc:
             raise click.ClickException(str(exc))
         except GitHubError as exc:
@@ -96,14 +107,18 @@ def score(
         except GitError as exc:
             raise click.ClickException(str(exc))
 
-        results: list[FileScore] = []
-        for cf in files:
+        def _score_local(cf: ChangedFile) -> FileScore:
             if is_ignored(cf.display_path, matcher):
-                results.append(score_file(cf.display_path, None, None, ignored=True))
-                continue
+                return score_file(cf.display_path, None, None, ignored=True)
             base_content = resolve_side(repo, base, cf.base_path)
             head_content = resolve_side(repo, head, cf.head_path)
-            results.append(score_file(cf.display_path, base_content, head_content))
+            return score_file(cf.display_path, base_content, head_content)
+
+        if jobs == 1 or len(files) <= 1:
+            results = [_score_local(cf) for cf in files]
+        else:
+            with ThreadPoolExecutor(max_workers=jobs) as pool:
+                results = list(pool.map(_score_local, files))
 
         diff_score = DiffScore(files=results)
 

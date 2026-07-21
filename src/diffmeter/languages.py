@@ -3,6 +3,7 @@ for files diffmeter doesn't have a grammar for."""
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional, Protocol
@@ -27,17 +28,30 @@ def detect_language(path: str) -> Optional[str]:
         return None
 
 
-@lru_cache(maxsize=None)
+_thread_local = threading.local()
+
+
 def get_parser(language: str) -> Optional[_Parser]:
     """A tree-sitter parser for `language`, or None if unavailable.
 
-    Cached because constructing a parser has real cost and diffmeter parses
-    many small snippets (before/after content per changed file).
+    Cached per-thread, not process-wide: tree-sitter Parser objects aren't
+    safe to call .parse() on concurrently from multiple threads (the
+    underlying library hands back a fresh object per call -- confirmed by
+    calling it twice and checking identity -- so a thread-local cache is
+    both correct and still avoids reconstructing a parser for every file).
+    A single shared cache would let score_diff's optional thread-pool
+    concurrency silently corrupt parses under load.
     """
-    try:
-        return _backend().get_parser(language)
-    except Exception:
-        return None
+    cache = getattr(_thread_local, "parsers", None)
+    if cache is None:
+        cache = {}
+        _thread_local.parsers = cache
+    if language not in cache:
+        try:
+            cache[language] = _backend().get_parser(language)
+        except Exception:
+            cache[language] = None
+    return cache[language]
 
 
 @dataclass(frozen=True)

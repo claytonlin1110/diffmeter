@@ -22,6 +22,7 @@ exact normalized match, a minimum length to avoid matching on stray `}` or
 from __future__ import annotations
 
 import difflib
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Iterable, Optional
@@ -284,6 +285,19 @@ def score_file(
 FilePair = tuple[str, Optional[bytes], Optional[bytes]]
 
 
-def score_diff(file_pairs: Iterable[FilePair]) -> DiffScore:
-    """Score a whole diff: an iterable of (path, base_content, head_content)."""
-    return DiffScore(files=[score_file(p, b, h) for p, b, h in file_pairs])
+def score_diff(file_pairs: Iterable[FilePair], max_workers: Optional[int] = None) -> DiffScore:
+    """Score a whole diff: an iterable of (path, base_content, head_content).
+
+    Each file is scored independently, so with max_workers > 1 (or None,
+    which lets ThreadPoolExecutor pick a default) files are scored
+    concurrently via a thread pool -- safe because tree-sitter parsers are
+    cached per-thread (see languages.get_parser), not shared. Results
+    preserve input order regardless of which thread finishes first.
+    """
+    pairs = list(file_pairs)
+    if max_workers == 1 or len(pairs) <= 1:
+        return DiffScore(files=[score_file(p, b, h) for p, b, h in pairs])
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(lambda pair: score_file(*pair), pairs))
+    return DiffScore(files=results)

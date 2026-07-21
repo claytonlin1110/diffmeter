@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "diffmeter"
-version = "0.4.0"
+version = "0.5.0"
 description = "Measure how much of a diff is real logic vs. comments, formatting, and noise."
 readme = "README.md"
 license = "MIT"
