@@ -45,6 +45,7 @@ class FileScore:
     language: Optional[str]
     heuristic: bool
     binary: bool
+    ignored: bool = False
     added_total: int = 0
     added_trivial: int = 0
     removed_total: int = 0
@@ -62,9 +63,9 @@ class FileScore:
 
     @property
     def score(self) -> Optional[float]:
-        """0-100, or None if there's nothing to score (binary file, or no
-        lines actually changed)."""
-        if self.binary or self.changed_total == 0:
+        """0-100, or None if there's nothing to score (binary file, a file
+        excluded via an ignore pattern, or no lines actually changed)."""
+        if self.binary or self.ignored or self.changed_total == 0:
             return None
         substantive = self.changed_total - self.changed_trivial
         return round(100.0 * substantive / self.changed_total, 1)
@@ -194,12 +195,30 @@ def _find_moved_lines(
 
 
 def score_file(
-    path: str, base_content: Optional[bytes], head_content: Optional[bytes]
+    path: str,
+    base_content: Optional[bytes],
+    head_content: Optional[bytes],
+    *,
+    ignored: bool = False,
 ) -> FileScore:
     """Score a single file's change. Pass base_content=None for a newly
-    added file, head_content=None for a deleted file."""
+    added file, head_content=None for a deleted file. Pass ignored=True to
+    record the file as excluded (e.g. by a configured ignore pattern)
+    without doing any parsing -- the caller is expected to have already
+    decided the file should be skipped, and content may not even be loaded
+    in that case."""
     language = detect_language(path)
     heuristic = language is None or get_parser(language) is None
+
+    if ignored:
+        return FileScore(
+            path=path,
+            language=language,
+            heuristic=heuristic,
+            binary=False,
+            ignored=True,
+            note="matches a configured ignore pattern, excluded from scoring",
+        )
 
     sample = head_content if head_content is not None else base_content
     is_binary = sample is not None and _BINARY_MARKER in sample[:_BINARY_SNIFF_BYTES]

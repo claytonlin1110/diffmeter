@@ -133,6 +133,39 @@ def test_score_pull_request_resolves_renamed_file_via_previous_filename():
     assert result.overall_score == 100.0
 
 
+def test_score_pull_request_skips_fetching_blobs_for_ignored_files():
+    from diffmeter.config import build_matcher
+
+    ref = PullRequestRef("acme", "widgets", 10)
+
+    pr_payload = json.dumps({"base": {"sha": "b"}, "head": {"sha": "h"}}).encode()
+    files_payload = json.dumps(
+        [
+            {"filename": "app.py", "status": "modified", "previous_filename": None},
+            {"filename": "package-lock.json", "status": "modified", "previous_filename": None},
+        ]
+    ).encode()
+
+    routes = {
+        "https://api.github.com/repos/acme/widgets/pulls/10/files": files_payload,
+        "https://api.github.com/repos/acme/widgets/pulls/10": pr_payload,
+        "https://raw.githubusercontent.com/acme/widgets/b/app.py": b"x = 1\n",
+        "https://raw.githubusercontent.com/acme/widgets/h/app.py": b"x = 2\n",
+        # deliberately no route for package-lock.json -- if the code tries to
+        # fetch it despite the ignore pattern, _fake_urlopen raises AssertionError
+    }
+
+    matcher = build_matcher(["package-lock.json"])
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen(routes)):
+        result = score_pull_request(ref, matcher=matcher)
+
+    by_path = {f.path: f for f in result.files}
+    assert by_path["package-lock.json"].ignored is True
+    assert by_path["package-lock.json"].score is None
+    assert by_path["app.py"].score == 100.0
+    assert result.overall_score == 100.0
+
+
 def test_get_json_raises_github_error_on_http_failure():
     import urllib.error
 

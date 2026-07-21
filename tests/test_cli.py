@@ -82,3 +82,42 @@ def test_cli_rejects_non_git_directory(tmp_path: Path):
     result = runner.invoke(main, ["score", str(not_a_repo)])
     assert result.exit_code != 0
     assert "not inside a git repository" in result.output
+
+
+def test_cli_ignore_flag_excludes_matching_file(repo: Path):
+    (repo / "a.py").write_text("def f():\n    return 2\n")
+    (repo / "generated.lock").write_text("v1\n")
+    _git(repo, "add", "generated.lock")
+    runner = CliRunner()
+    result = runner.invoke(main, ["score", str(repo), "--ignore", "*.lock", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    by_path = {f["path"]: f for f in payload["files"]}
+    assert by_path["generated.lock"]["ignored"] is True
+    assert by_path["generated.lock"]["score"] is None
+    assert by_path["a.py"]["ignored"] is False
+    # the ignored file must not affect the overall score
+    assert payload["overall_score"] == 100.0
+
+
+def test_cli_loads_ignore_patterns_from_config_file(repo: Path):
+    (repo / ".diffmeter.toml").write_text('ignore = ["*.lock"]\n')
+    _git(repo, "add", ".diffmeter.toml")
+    _git(repo, "commit", "-q", "-m", "add config")
+    (repo / "generated.lock").write_text("v1\n")
+    _git(repo, "add", "generated.lock")
+    runner = CliRunner()
+    result = runner.invoke(main, ["score", str(repo), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["files"][0]["path"] == "generated.lock"
+    assert payload["files"][0]["ignored"] is True
+    assert payload["overall_score"] is None
+
+
+def test_cli_rejects_invalid_config_file(repo: Path):
+    (repo / ".diffmeter.toml").write_text("not [ valid toml\n")
+    runner = CliRunner()
+    result = runner.invoke(main, ["score", str(repo)])
+    assert result.exit_code != 0
+    assert ".diffmeter.toml" in result.output

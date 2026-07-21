@@ -12,6 +12,9 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Optional
 
+import pathspec
+
+from diffmeter.config import is_ignored
 from diffmeter.scorer import DiffScore, score_file
 
 _API_ROOT = "https://api.github.com"
@@ -95,7 +98,11 @@ def _fetch_blob(owner: str, repo: str, sha: str, path: str) -> Optional[bytes]:
         raise GitHubError(f"Could not reach raw.githubusercontent.com: {exc.reason}") from exc
 
 
-def score_pull_request(ref: PullRequestRef) -> DiffScore:
+def score_pull_request(ref: PullRequestRef, matcher: Optional[pathspec.PathSpec] = None) -> DiffScore:
+    """`matcher` (see diffmeter.config.build_matcher) excludes matching paths
+    from scoring without fetching their blob content -- there's no local
+    checkout to read a .diffmeter.toml from in this mode, so patterns must
+    be passed in explicitly by the caller."""
     pr = _get_json(f"{_API_ROOT}/repos/{ref.owner}/{ref.repo}/pulls/{ref.number}")
     base_sha = pr["base"]["sha"]
     head_sha = pr["head"]["sha"]
@@ -104,8 +111,12 @@ def score_pull_request(ref: PullRequestRef) -> DiffScore:
     for f in _fetch_pr_files(ref):
         status = f["status"]  # "added" | "removed" | "modified" | "renamed" | "copied" | "changed"
         path = f["filename"]
-        previous_path = f.get("previous_filename") or path
 
+        if is_ignored(path, matcher):
+            results.append(score_file(path, None, None, ignored=True))
+            continue
+
+        previous_path = f.get("previous_filename") or path
         base_content = None if status == "added" else _fetch_blob(ref.owner, ref.repo, base_sha, previous_path)
         head_content = None if status == "removed" else _fetch_blob(ref.owner, ref.repo, head_sha, path)
         results.append(score_file(path, base_content, head_content))

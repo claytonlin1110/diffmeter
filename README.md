@@ -108,6 +108,30 @@ Gate a CI job on it — fail the build if a PR is (say) more than 70% trivial:
 diffmeter score --base origin/main --min-score 30
 ```
 
+### Excluding files from scoring
+
+Lockfiles, vendored code, and generated/minified bundles shouldn't count
+toward the score either way — a regenerated `package-lock.json` can add
+thousands of lines nobody actually wrote, swamping a real, small change.
+Exclude paths with `--ignore` (repeatable, gitignore-style patterns):
+
+```
+diffmeter score --ignore "*.lock" --ignore "dist/**"
+```
+
+Or commit a `.diffmeter.toml` in the repo root so it applies automatically
+for local scoring (not `--pr` mode — there's no checkout to read it from
+there, so pass `--ignore` explicitly if you need it with `--pr`):
+
+```toml
+# .diffmeter.toml
+ignore = ["*.lock", "package-lock.json", "dist/**", "**/vendor/**"]
+```
+
+Excluded files still show up in the output (with `score: null` /
+`ignored: true`) so it's obvious what got skipped and why, rather than
+silently vanishing from the report.
+
 ### In GitHub Actions
 
 ```yaml

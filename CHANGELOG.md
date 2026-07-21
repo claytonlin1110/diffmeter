@@ -3,6 +3,23 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-07-20
+
+### Added
+
+- Ignore patterns: exclude paths from scoring entirely via `--ignore
+  PATTERN` (repeatable, gitignore-style) or a `.diffmeter.toml` file
+  (`ignore = [...]`) in the repo root, auto-loaded for local scoring.
+  `--pr` mode has no local checkout to read a config file from, so it only
+  honors `--ignore` passed explicitly. Excluded files still appear in
+  output (`ignored: true`, `score: null`) instead of silently vanishing,
+  and their blob content isn't even fetched in `--pr` mode.
+- New `diffmeter.config` module: `load_config`, `build_matcher`,
+  `is_ignored`, `DiffmeterConfig`, `ConfigError` -- all re-exported from
+  the top-level package for library use.
+- New dependencies: `pathspec` (gitignore-style matching) and `tomli` on
+  Python < 3.11 (stdlib `tomllib` covers 3.11+).
+
 ## [0.3.0] - 2026-07-20
 
 ### Added

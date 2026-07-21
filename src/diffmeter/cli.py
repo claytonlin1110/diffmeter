@@ -8,6 +8,7 @@ from typing import Optional
 import click
 
 from diffmeter import __version__
+from diffmeter.config import ConfigError, build_matcher, is_ignored, load_config
 from diffmeter.git_utils import GitError, changed_files, is_git_repo, resolve_side
 from diffmeter.github_pr import GitHubError, parse_pr_reference, score_pull_request
 from diffmeter.scorer import DiffScore, FileScore, score_file
@@ -49,6 +50,16 @@ def main() -> None:
     "URL. No local clone needed. Set GITHUB_TOKEN (or GH_TOKEN) to avoid GitHub's low "
     "unauthenticated rate limit. Ignores PATH/--base/--head.",
 )
+@click.option(
+    "--ignore",
+    "ignore_patterns",
+    multiple=True,
+    metavar="PATTERN",
+    help="Gitignore-style pattern for paths to exclude from scoring entirely (e.g. "
+    "generated files, vendored code). Repeatable. Local scoring also auto-loads "
+    "patterns from a .diffmeter.toml `ignore` list in the repo root; --pr mode only "
+    "sees patterns passed explicitly here, since there's no local checkout to read.",
+)
 def score(
     path: Path,
     base: str,
@@ -56,13 +67,15 @@ def score(
     as_json: bool,
     min_score: Optional[float],
     pr_ref: Optional[str],
+    ignore_patterns: tuple[str, ...],
 ) -> None:
     """Score the diff between BASE and HEAD (default: working tree vs HEAD)
     in the repository at PATH (default: current directory)."""
     if pr_ref is not None:
         try:
             ref = parse_pr_reference(pr_ref)
-            diff_score = score_pull_request(ref)
+            matcher = build_matcher(list(ignore_patterns))
+            diff_score = score_pull_request(ref, matcher=matcher)
         except ValueError as exc:
             raise click.ClickException(str(exc))
         except GitHubError as exc:
@@ -73,12 +86,21 @@ def score(
             raise click.ClickException(f"{repo} is not inside a git repository")
 
         try:
+            config = load_config(repo)
+        except ConfigError as exc:
+            raise click.ClickException(str(exc))
+        matcher = build_matcher(list(config.ignore) + list(ignore_patterns))
+
+        try:
             files = changed_files(repo, base, head)
         except GitError as exc:
             raise click.ClickException(str(exc))
 
         results: list[FileScore] = []
         for cf in files:
+            if is_ignored(cf.display_path, matcher):
+                results.append(score_file(cf.display_path, None, None, ignored=True))
+                continue
             base_content = resolve_side(repo, base, cf.base_path)
             head_content = resolve_side(repo, head, cf.head_path)
             results.append(score_file(cf.display_path, base_content, head_content))
@@ -105,6 +127,7 @@ def _print_json(diff_score: DiffScore) -> None:
                 "language": r.language,
                 "heuristic": r.heuristic,
                 "binary": r.binary,
+                "ignored": r.ignored,
                 "added_total": r.added_total,
                 "added_trivial": r.added_trivial,
                 "removed_total": r.removed_total,
@@ -142,6 +165,9 @@ def _print_table(diff_score: DiffScore) -> None:
         click.echo("(* = no grammar available for this file type; used a best-effort heuristic)")
     if diff_score.moved:
         click.echo(f"({diff_score.moved} line(s) across the diff look moved rather than newly written)")
+    ignored_count = sum(1 for r in diff_score.files if r.ignored)
+    if ignored_count:
+        click.echo(f"({ignored_count} file(s) excluded via an ignore pattern)")
 
 
 if __name__ == "__main__":
