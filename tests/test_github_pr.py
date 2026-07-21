@@ -1,9 +1,25 @@
 import json
+import urllib.error
+import urllib.request
+from email.message import Message
 from unittest.mock import patch
 
 import pytest
 
-from diffmeter.github_pr import GitHubError, PullRequestRef, parse_pr_reference, score_pull_request
+from diffmeter.github_pr import (
+    GitHubError,
+    PullRequestRef,
+    _urlopen_with_retry,
+    parse_pr_reference,
+    score_pull_request,
+)
+
+
+def _http_error(code: int, retry_after: "str | None" = None) -> urllib.error.HTTPError:
+    headers = Message()
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return urllib.error.HTTPError("https://example.test/x", code, "error", headers, None)
 
 
 @pytest.mark.parametrize(
@@ -164,6 +180,84 @@ def test_score_pull_request_skips_fetching_blobs_for_ignored_files():
     assert by_path["package-lock.json"].score is None
     assert by_path["app.py"].score == 100.0
     assert result.overall_score == 100.0
+
+
+def _request():
+    return urllib.request.Request("https://example.test/x")
+
+
+def test_urlopen_with_retry_succeeds_immediately_without_sleeping():
+    with patch("urllib.request.urlopen", return_value=_FakeResponse(b"ok")) as mock_open:
+        with patch("diffmeter.github_pr.time.sleep") as mock_sleep:
+            result = _urlopen_with_retry(_request())
+    assert result == b"ok"
+    assert mock_open.call_count == 1
+    mock_sleep.assert_not_called()
+
+
+def test_urlopen_with_retry_retries_on_5xx_then_succeeds():
+    side_effects = [_http_error(503), _http_error(502), _FakeResponse(b"ok")]
+    with patch("urllib.request.urlopen", side_effect=side_effects) as mock_open:
+        with patch("diffmeter.github_pr.time.sleep") as mock_sleep:
+            result = _urlopen_with_retry(_request())
+    assert result == b"ok"
+    assert mock_open.call_count == 3
+    assert mock_sleep.call_count == 2
+
+
+def test_urlopen_with_retry_retries_on_connection_error_then_succeeds():
+    side_effects = [urllib.error.URLError("connection reset"), _FakeResponse(b"ok")]
+    with patch("urllib.request.urlopen", side_effect=side_effects):
+        with patch("diffmeter.github_pr.time.sleep") as mock_sleep:
+            result = _urlopen_with_retry(_request())
+    assert result == b"ok"
+    assert mock_sleep.call_count == 1
+
+
+def test_urlopen_with_retry_honors_retry_after_on_secondary_rate_limit():
+    side_effects = [_http_error(403, retry_after="5"), _FakeResponse(b"ok")]
+    with patch("urllib.request.urlopen", side_effect=side_effects):
+        with patch("diffmeter.github_pr.time.sleep") as mock_sleep:
+            _urlopen_with_retry(_request())
+    mock_sleep.assert_called_once_with(5.0)
+
+
+def test_urlopen_with_retry_caps_retry_after_at_max_wait():
+    side_effects = [_http_error(403, retry_after="99999"), _FakeResponse(b"ok")]
+    with patch("urllib.request.urlopen", side_effect=side_effects):
+        with patch("diffmeter.github_pr.time.sleep") as mock_sleep:
+            _urlopen_with_retry(_request())
+    mock_sleep.assert_called_once_with(60.0)
+
+
+def test_urlopen_with_retry_does_not_retry_404():
+    with patch("urllib.request.urlopen", side_effect=_http_error(404)) as mock_open:
+        with patch("diffmeter.github_pr.time.sleep") as mock_sleep:
+            with pytest.raises(urllib.error.HTTPError) as exc_info:
+                _urlopen_with_retry(_request())
+    assert exc_info.value.code == 404
+    assert mock_open.call_count == 1
+    mock_sleep.assert_not_called()
+
+
+def test_urlopen_with_retry_does_not_retry_403_without_retry_after():
+    """A 403 with no Retry-After is GitHub's *primary* rate limit -- the
+    quota is genuinely exhausted, not a transient blip, so retrying
+    immediately would just fail again."""
+    with patch("urllib.request.urlopen", side_effect=_http_error(403)) as mock_open:
+        with patch("diffmeter.github_pr.time.sleep") as mock_sleep:
+            with pytest.raises(urllib.error.HTTPError):
+                _urlopen_with_retry(_request())
+    assert mock_open.call_count == 1
+    mock_sleep.assert_not_called()
+
+
+def test_urlopen_with_retry_gives_up_after_max_retries():
+    with patch("urllib.request.urlopen", side_effect=_http_error(503)) as mock_open:
+        with patch("diffmeter.github_pr.time.sleep"):
+            with pytest.raises(urllib.error.HTTPError):
+                _urlopen_with_retry(_request(), max_retries=2)
+    assert mock_open.call_count == 3  # 1 initial attempt + 2 retries
 
 
 def test_get_json_raises_github_error_on_http_failure():

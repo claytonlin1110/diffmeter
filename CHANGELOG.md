@@ -3,6 +3,24 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.1] - 2026-07-21
+
+### Fixed
+
+- `--pr` mode now retries transient GitHub failures with backoff instead
+  of failing the whole scan on one blip: connection errors, 5xx server
+  errors, and GitHub's *secondary* rate limit (a 403 carrying a
+  `Retry-After` header, which is honored exactly, capped at 60s so a large
+  value can't stall a job for an hour). Motivated by watching this
+  project's own CI hit a transient 429 downloading a GitHub Action a few
+  runs ago -- transient failures against GitHub's infrastructure are a
+  real, observed thing, not a hypothetical.
+- Deliberately does *not* retry a 404 (won't fix itself), a 401 (auth
+  failure), or a 403 with no `Retry-After` -- that last one is GitHub's
+  *primary* rate limit, meaning the quota is genuinely exhausted, and
+  retrying immediately would just fail again; the existing GITHUB_TOKEN
+  hint is the real fix for that case.
+
 ## [0.5.0] - 2026-07-21
 
 ### Added

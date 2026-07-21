@@ -100,7 +100,10 @@ diffmeter score --pr https://github.com/owner/repo/pull/123
 ```
 
 Set `GITHUB_TOKEN` (or `GH_TOKEN`) in the environment to avoid GitHub's low
-unauthenticated API rate limit.
+unauthenticated API rate limit. Transient failures (connection errors, 5xx
+responses, GitHub's secondary rate limit) are retried automatically with
+backoff; a real exhausted primary rate limit or a 404 fails immediately
+rather than retrying something that won't fix itself.
 
 Files are scored concurrently by default (`--jobs 8`; `--jobs 1` disables
 it) — on a real 10-file PR (`pallets/click#3704`) this took `--pr` scoring

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -20,6 +21,10 @@ from diffmeter.scorer import DiffScore, FileScore, score_file
 
 _API_ROOT = "https://api.github.com"
 _RAW_ROOT = "https://raw.githubusercontent.com"
+
+_MAX_RETRIES = 3
+_RETRYABLE_STATUS = {500, 502, 503, 504}
+_MAX_RETRY_AFTER_SECONDS = 60
 
 _URL_RE = re.compile(r"^(?:(?:https?://)?github\.com/)?([^/\s]+)/([^/\s]+)/pull/(\d+)/?$")
 _SHORT_RE = re.compile(r"^([^/\s]+)/([^/\s]+)#(\d+)$")
@@ -57,11 +62,46 @@ def _headers() -> dict:
     return headers
 
 
+def _urlopen_with_retry(
+    req: urllib.request.Request, *, timeout: int = 15, max_retries: int = _MAX_RETRIES
+) -> bytes:
+    """GET `req`, retrying transient failures with backoff.
+
+    Retries: connection-level errors (URLError -- DNS hiccups, timeouts,
+    resets), 5xx server errors, and GitHub's *secondary* rate limit (a 403
+    that carries a Retry-After header, per GitHub's own docs on abuse
+    detection -- respected exactly, capped at _MAX_RETRY_AFTER_SECONDS so a
+    huge value can't stall a CI job for an hour).
+
+    Does NOT retry: 404 (won't fix itself), 401 (auth failure), or a 403
+    with no Retry-After -- that's GitHub's *primary* rate limit, which
+    means the quota is actually exhausted, not a transient blip. Retrying
+    that immediately would just fail again; the existing GITHUB_TOKEN hint
+    in the caller is the real fix.
+    """
+    attempt = 0
+    while True:
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            retryable = exc.code in _RETRYABLE_STATUS or (exc.code == 403 and retry_after is not None)
+            if not retryable or attempt >= max_retries:
+                raise
+            delay = min(float(retry_after), _MAX_RETRY_AFTER_SECONDS) if retry_after else 2**attempt
+        except urllib.error.URLError:
+            if attempt >= max_retries:
+                raise
+            delay = 2**attempt
+        time.sleep(delay)
+        attempt += 1
+
+
 def _get_json(url: str):
     req = urllib.request.Request(url, headers=_headers())
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read())
+        return json.loads(_urlopen_with_retry(req))
     except urllib.error.HTTPError as exc:
         hint = ""
         if exc.code == 403:
@@ -89,8 +129,7 @@ def _fetch_blob(owner: str, repo: str, sha: str, path: str) -> Optional[bytes]:
     url = f"{_RAW_ROOT}/{owner}/{repo}/{sha}/{urllib.parse.quote(path)}"
     req = urllib.request.Request(url, headers={"User-Agent": "diffmeter"})
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return resp.read()
+        return _urlopen_with_retry(req)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return None
