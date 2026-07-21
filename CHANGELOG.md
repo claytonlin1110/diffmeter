@@ -3,6 +3,43 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0] - 2026-07-21
+
+### Added
+
+- Per-path weighting: `--weight PATTERN=NUMBER` (repeatable, gitignore-style
+  pattern; later ones win on a collision) or a `[weights]` table in
+  `.diffmeter.toml`, e.g. down-weighting docs or test fixtures relative to
+  application code instead of excluding them outright. New `weight` field
+  on `FileScore` (default 1.0, shown in `--json` output and, when any file
+  has a non-default weight, as a WEIGHT column in the table view).
+  `DiffScore.overall_score` is now a weighted average across files;
+  `changed_total`/`changed_trivial` stay unweighted raw counts for
+  transparency, and a file's own `score` is unaffected by its weight --
+  weight only controls how much that file's result counts toward the
+  aggregate. Closes the "per-language weighting" item that had been on the
+  roadmap since 0.1.0 (turned out more useful scoped to path patterns than
+  strictly to language, since it lets you weight a specific directory).
+- `score_file()`, `score_pull_request()`, `DiffmeterConfig` all gained a
+  `weight`/`weights` parameter; new `diffmeter.config` functions
+  `build_weight_matchers`, `resolve_weight`, `parse_weight_flag`, all
+  re-exported from the top-level package.
+
+### Notes
+
+- CLI weight overrides always win over `.diffmeter.toml` on a pattern
+  collision, by construction (config patterns are matched first, CLI
+  patterns appended after) -- not by a dict merge, which would not
+  actually guarantee that (Python's `{**a, **b}` keeps a colliding key's
+  *position* from `a`, which could let an unrelated later pattern in `a`
+  still win). Covered by a dedicated test.
+- Cross-file move detection (extracting a function to a new file currently
+  scores as 100% new on both sides rather than being recognized as a
+  move) is still open -- see CONTRIBUTING.md's roadmap. It's a real gap,
+  but fixing it means moving move-matching from the per-file level up to
+  the whole-diff level, which is more architecture change than fits
+  alongside this release.
+
 ## [0.5.1] - 2026-07-21
 
 ### Fixed

@@ -1,4 +1,4 @@
-from diffmeter.scorer import score_diff, score_file
+from diffmeter.scorer import DiffScore, score_diff, score_file
 
 
 def test_pure_comment_addition_scores_zero():
@@ -182,3 +182,58 @@ def test_moved_line_and_genuine_change_are_distinguished_in_the_same_file():
     assert result.removed_trivial == 1
     # y = 2 -> y = 3 is a genuine change and must still count as substantive.
     assert result.score == 66.7
+
+
+def test_default_weight_does_not_change_a_files_own_score():
+    base = b"def f():\n    return 1\n"
+    head = b"def f():\n    return 2\n"
+    result = score_file("f.py", base, head, weight=0.3)
+    # weight affects DiffScore.overall_score, not this file's own score
+    assert result.score == 100.0
+    assert result.weight == 0.3
+
+
+def test_overall_score_unweighted_when_no_weights_given():
+    pairs = [
+        ("a.py", b"x = 1\n", b"x = 1\n# comment\n"),  # trivial, drags score down
+        ("b.py", b"y = 1\n", b"y = 2\n"),  # substantive
+    ]
+    result = score_diff(pairs)
+    assert result.overall_score == 66.7
+    assert all(f.weight == 1.0 for f in result.files)
+
+
+def test_overall_score_excludes_zero_weighted_file():
+    files = [
+        score_file("a.py", b"x = 1\n", b"x = 1\n# comment\n", weight=0.0),
+        score_file("b.py", b"y = 1\n", b"y = 2\n", weight=1.0),
+    ]
+    result = DiffScore(files=files)
+    assert result.overall_score == 100.0
+    # unweighted raw totals stay untouched, for transparency: a.py
+    # contributes 1 changed (trivial) line, b.py contributes 2 (substantive)
+    assert result.changed_total == 3
+    assert result.changed_trivial == 1
+
+
+def test_overall_score_is_none_when_all_weighted_mass_is_zero():
+    files = [
+        score_file("a.py", b"x = 1\n", b"x = 2\n", weight=0.0),
+        score_file("b.py", b"y = 1\n", b"y = 2\n", weight=0.0),
+    ]
+    result = DiffScore(files=files)
+    assert result.overall_score is None
+
+
+def test_overall_score_partial_weight_shifts_the_average():
+    files = [
+        # 1 changed line, trivial (0 substantive)
+        score_file("a.py", b"x = 1\n", b"x = 1\n# comment\n", weight=0.5),
+        # 2 changed lines (1 added, 1 removed), both substantive
+        score_file("b.py", b"y = 1\n", b"y = 2\n", weight=1.0),
+    ]
+    result = DiffScore(files=files)
+    # weighted: (0.5*1 + 1.0*2) total "mass", (0.5*0 + 1.0*2) substantive
+    # = 2.0 / 2.5 = 80%, vs. 66.7% if both files' lines counted equally
+    # (2 substantive / 3 total) -- weighting a.py down shrinks its drag.
+    assert result.overall_score == 80.0

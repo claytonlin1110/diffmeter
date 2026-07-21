@@ -260,6 +260,40 @@ def test_urlopen_with_retry_gives_up_after_max_retries():
     assert mock_open.call_count == 3  # 1 initial attempt + 2 retries
 
 
+def test_score_pull_request_applies_weight_matchers():
+    from diffmeter.config import build_weight_matchers
+
+    ref = PullRequestRef("acme", "widgets", 11)
+
+    pr_payload = json.dumps({"base": {"sha": "b"}, "head": {"sha": "h"}}).encode()
+    files_payload = json.dumps(
+        [
+            {"filename": "app.py", "status": "modified", "previous_filename": None},
+            {"filename": "README.md", "status": "modified", "previous_filename": None},
+        ]
+    ).encode()
+
+    routes = {
+        "https://api.github.com/repos/acme/widgets/pulls/11/files": files_payload,
+        "https://api.github.com/repos/acme/widgets/pulls/11": pr_payload,
+        "https://raw.githubusercontent.com/acme/widgets/b/app.py": b"x = 1\n",
+        "https://raw.githubusercontent.com/acme/widgets/h/app.py": b"x = 2\n",
+        "https://raw.githubusercontent.com/acme/widgets/b/README.md": b"line\n",
+        "https://raw.githubusercontent.com/acme/widgets/h/README.md": b"line\n\n",
+    }
+
+    weight_matchers = build_weight_matchers([("README.md", 0.0)])
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen(routes)):
+        unweighted = score_pull_request(ref)
+        weighted = score_pull_request(ref, weight_matchers=weight_matchers)
+
+    by_path = {f.path: f for f in weighted.files}
+    assert by_path["README.md"].weight == 0.0
+    assert by_path["app.py"].weight == 1.0
+    assert unweighted.overall_score != weighted.overall_score
+    assert weighted.overall_score == 100.0
+
+
 def test_get_json_raises_github_error_on_http_failure():
     import urllib.error
 

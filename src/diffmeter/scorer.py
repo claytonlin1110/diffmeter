@@ -47,6 +47,7 @@ class FileScore:
     heuristic: bool
     binary: bool
     ignored: bool = False
+    weight: float = 1.0
     added_total: int = 0
     added_trivial: int = 0
     removed_total: int = 0
@@ -65,7 +66,13 @@ class FileScore:
     @property
     def score(self) -> Optional[float]:
         """0-100, or None if there's nothing to score (binary file, a file
-        excluded via an ignore pattern, or no lines actually changed)."""
+        excluded via an ignore pattern, or no lines actually changed).
+
+        This is the file's own substance ratio, unaffected by `weight` --
+        weight only controls how much this file's result counts toward
+        DiffScore.overall_score, not what "80% substantive" means for the
+        file on its own.
+        """
         if self.binary or self.ignored or self.changed_total == 0:
             return None
         substantive = self.changed_total - self.changed_trivial
@@ -90,10 +97,19 @@ class DiffScore:
 
     @property
     def overall_score(self) -> Optional[float]:
-        total = self.changed_total
-        if total == 0:
+        """Weighted by each file's `weight` (see FileScore.weight, set from
+        the .diffmeter.toml [weights] table): a file at weight 0.5 counts
+        half as much toward this aggregate as one at the default weight of
+        1.0. `changed_total`/`changed_trivial` above stay unweighted raw
+        counts for transparency; only this aggregate applies weighting.
+        With no weights configured (the default), this is identical to a
+        plain unweighted score.
+        """
+        weighted_total = sum(f.weight * f.changed_total for f in self.files)
+        if weighted_total == 0:
             return None
-        return round(100.0 * (total - self.changed_trivial) / total, 1)
+        weighted_trivial = sum(f.weight * f.changed_trivial for f in self.files)
+        return round(100.0 * (weighted_total - weighted_trivial) / weighted_total, 1)
 
 
 def _normalize(content: bytes) -> bytes:
@@ -201,13 +217,16 @@ def score_file(
     head_content: Optional[bytes],
     *,
     ignored: bool = False,
+    weight: float = 1.0,
 ) -> FileScore:
     """Score a single file's change. Pass base_content=None for a newly
     added file, head_content=None for a deleted file. Pass ignored=True to
     record the file as excluded (e.g. by a configured ignore pattern)
     without doing any parsing -- the caller is expected to have already
     decided the file should be skipped, and content may not even be loaded
-    in that case."""
+    in that case. `weight` (see diffmeter.config.resolve_weight) only
+    affects how much this file counts toward a DiffScore's overall_score;
+    it doesn't change this file's own `score`."""
     language = detect_language(path)
     heuristic = language is None or get_parser(language) is None
 
@@ -218,13 +237,14 @@ def score_file(
             heuristic=heuristic,
             binary=False,
             ignored=True,
+            weight=weight,
             note="matches a configured ignore pattern, excluded from scoring",
         )
 
     sample = head_content if head_content is not None else base_content
     is_binary = sample is not None and _BINARY_MARKER in sample[:_BINARY_SNIFF_BYTES]
 
-    result = FileScore(path=path, language=language, heuristic=heuristic, binary=is_binary)
+    result = FileScore(path=path, language=language, heuristic=heuristic, binary=is_binary, weight=weight)
     if is_binary:
         result.note = "binary file, excluded from scoring"
         return result

@@ -16,7 +16,7 @@ from typing import Optional
 
 import pathspec
 
-from diffmeter.config import is_ignored
+from diffmeter.config import WeightMatchers, is_ignored, resolve_weight
 from diffmeter.scorer import DiffScore, FileScore, score_file
 
 _API_ROOT = "https://api.github.com"
@@ -144,28 +144,33 @@ def _score_pr_entry(
     head_sha: str,
     entry: dict,
     matcher: Optional[pathspec.PathSpec],
+    weight_matchers: Optional[WeightMatchers],
 ) -> FileScore:
     status = entry["status"]  # "added" | "removed" | "modified" | "renamed" | "copied" | "changed"
     path = entry["filename"]
+    weight = resolve_weight(path, weight_matchers or [])
 
     if is_ignored(path, matcher):
-        return score_file(path, None, None, ignored=True)
+        return score_file(path, None, None, ignored=True, weight=weight)
 
     previous_path = entry.get("previous_filename") or path
     base_content = None if status == "added" else _fetch_blob(ref.owner, ref.repo, base_sha, previous_path)
     head_content = None if status == "removed" else _fetch_blob(ref.owner, ref.repo, head_sha, path)
-    return score_file(path, base_content, head_content)
+    return score_file(path, base_content, head_content, weight=weight)
 
 
 def score_pull_request(
     ref: PullRequestRef,
     matcher: Optional[pathspec.PathSpec] = None,
+    weight_matchers: Optional[WeightMatchers] = None,
     max_workers: Optional[int] = 8,
 ) -> DiffScore:
     """`matcher` (see diffmeter.config.build_matcher) excludes matching paths
-    from scoring without fetching their blob content -- there's no local
-    checkout to read a .diffmeter.toml from in this mode, so patterns must
-    be passed in explicitly by the caller.
+    from scoring without fetching their blob content; `weight_matchers`
+    (see diffmeter.config.build_weight_matchers) controls how much matching
+    paths count toward the overall score. Neither reads a .diffmeter.toml
+    here -- there's no local checkout to read it from in this mode, so both
+    must be passed in explicitly by the caller.
 
     Per-file blob fetching and scoring runs concurrently (max_workers
     threads, default 8): this is dominated by network round-trips to
@@ -178,11 +183,14 @@ def score_pull_request(
 
     entries = _fetch_pr_files(ref)
     if max_workers == 1 or len(entries) <= 1:
-        results = [_score_pr_entry(ref, base_sha, head_sha, e, matcher) for e in entries]
+        results = [_score_pr_entry(ref, base_sha, head_sha, e, matcher, weight_matchers) for e in entries]
     else:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             results = list(
-                pool.map(lambda e: _score_pr_entry(ref, base_sha, head_sha, e, matcher), entries)
+                pool.map(
+                    lambda e: _score_pr_entry(ref, base_sha, head_sha, e, matcher, weight_matchers),
+                    entries,
+                )
             )
 
     return DiffScore(files=results)

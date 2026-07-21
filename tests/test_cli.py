@@ -121,3 +121,63 @@ def test_cli_rejects_invalid_config_file(repo: Path):
     result = runner.invoke(main, ["score", str(repo)])
     assert result.exit_code != 0
     assert ".diffmeter.toml" in result.output
+
+
+@pytest.fixture()
+def repo_with_readme(repo: Path) -> Path:
+    (repo / "README.md").write_text("# Title\nline\n")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-q", "-m", "add readme")
+    return repo
+
+
+def test_cli_weight_flag_shifts_overall_score(repo_with_readme: Path):
+    (repo_with_readme / "a.py").write_text("def f():\n    return 2\n")  # substantive
+    (repo_with_readme / "README.md").write_text("# Title\nline\n\n")  # trivial (blank line)
+    runner = CliRunner()
+
+    unweighted = runner.invoke(main, ["score", str(repo_with_readme), "--json"])
+    assert json.loads(unweighted.output)["overall_score"] == 66.7
+
+    weighted = runner.invoke(main, ["score", str(repo_with_readme), "--weight", "README.md=0", "--json"])
+    assert weighted.exit_code == 0
+    payload = json.loads(weighted.output)
+    assert payload["overall_score"] == 100.0
+    by_path = {f["path"]: f for f in payload["files"]}
+    assert by_path["README.md"]["weight"] == 0.0
+    assert by_path["a.py"]["weight"] == 1.0
+
+
+def test_cli_weight_flag_rejects_invalid_form(repo: Path):
+    runner = CliRunner()
+    result = runner.invoke(main, ["score", str(repo), "--weight", "not-valid"])
+    assert result.exit_code != 0
+    assert "--weight" in result.output
+
+
+def test_cli_loads_weights_from_config_file(repo_with_readme: Path):
+    (repo_with_readme / ".diffmeter.toml").write_text('[weights]\n"README.md" = 0\n')
+    _git(repo_with_readme, "add", ".diffmeter.toml")
+    _git(repo_with_readme, "commit", "-q", "-m", "add config")
+    (repo_with_readme / "a.py").write_text("def f():\n    return 2\n")
+    (repo_with_readme / "README.md").write_text("# Title\nline\n\n")
+    runner = CliRunner()
+    result = runner.invoke(main, ["score", str(repo_with_readme), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["overall_score"] == 100.0
+
+
+def test_cli_weight_flag_overrides_config_on_same_pattern(repo_with_readme: Path):
+    (repo_with_readme / ".diffmeter.toml").write_text('[weights]\n"README.md" = 0.2\n')
+    _git(repo_with_readme, "add", ".diffmeter.toml")
+    _git(repo_with_readme, "commit", "-q", "-m", "add config")
+    (repo_with_readme / "README.md").write_text("# Title\nline\n\n")
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["score", str(repo_with_readme), "--weight", "README.md=0.9", "--json"]
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    by_path = {f["path"]: f for f in payload["files"]}
+    assert by_path["README.md"]["weight"] == 0.9

@@ -64,15 +64,25 @@ Noted here so effort isn't duplicated:
 
 - **Full structural (AST tree) diffing.** The scorer line-diffs old vs.
   new content (`difflib`) and classifies each changed line independently;
-  `_find_moved_lines` in `scorer.py` layers on same-file, exact-content
-  move detection to catch pure reordering, but that's a content-matching
+  `_find_moved_lines` in `scorer.py` layers on exact-content move
+  detection to catch pure reordering, but that's a content-matching
   heuristic, not a real tree-diff. It won't catch a moved block whose
-  formatting also changed, or a move across two files. A real tree-diff
-  (matching AST nodes across the edit, e.g. GumTree-style) would handle
-  both, at the cost of meaningfully more complexity. Worth doing once the
-  simpler approach's limits are actually felt in practice, not before.
-- **Per-language weighting.** Right now every substantive line counts
-  equally regardless of language. Some scoring use cases may want to
-  weight, e.g., generated files or config-language changes differently
-  from application code. No design for this yet — open an issue if you
-  have a concrete use case before sending a PR.
+  formatting also changed. A real tree-diff (matching AST nodes across the
+  edit, e.g. GumTree-style) would handle that, at the cost of meaningfully
+  more complexity. Worth doing once the simpler approach's limits are
+  actually felt in practice, not before.
+- **Cross-file move detection.** `_find_moved_lines` only matches lines
+  within the *same* file's added/removed sets, so extracting a function to
+  a new file scores as 100% new on both sides instead of being recognized
+  as a move. Fixing this means moving the matching pass up from per-file
+  `score_file` to the multi-file level (`score_diff`/`score_pull_request`)
+  so it can pool candidate lines across all changed files at once --
+  doable without a full tree-diff, but touches the scoring pipeline's
+  architecture (all three per-file call sites) more than a purely additive
+  change, so it deserves its own careful pass rather than being bolted on.
+- ~~Per-language weighting~~ — done: see `--weight` / the `.diffmeter.toml`
+  `[weights]` table (README has usage). It's actually per-*path-pattern*
+  weighting rather than per-language, which turned out more flexible (lets
+  you weight a specific directory, not just a whole language) — if a
+  genuinely per-language axis turns out to be needed on top of that, open
+  an issue with the concrete use case.

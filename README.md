@@ -145,6 +145,36 @@ Excluded files still show up in the output (with `score: null` /
 `ignored: true`) so it's obvious what got skipped and why, rather than
 silently vanishing from the report.
 
+### Weighting files instead of excluding them
+
+Sometimes you don't want to exclude a file entirely, just count it for
+less — docs and test fixtures are real, but maybe shouldn't carry the same
+weight as application code in the overall number. `--weight` takes a
+gitignore-style pattern and a multiplier (repeatable; later ones win on a
+pattern collision, same precedence rule as `.gitignore`):
+
+```
+diffmeter score --weight "*.md=0.3" --weight "tests/**=0.5"
+```
+
+Or a `[weights]` table in `.diffmeter.toml` (same `--pr`-mode caveat as
+`ignore` — no checkout to read it from there):
+
+```toml
+# .diffmeter.toml
+[weights]
+"*.md" = 0.3
+"tests/**" = 0.5
+```
+
+Weight only affects `overall_score` — a file's own `score` (the "is this
+particular file's diff substantive" number) is unaffected, since weight is
+about how much that file's result should count toward the aggregate, not
+a claim about what happened inside the file. Default weight is 1.0 for
+anything unmatched. `--weight 'PATTERN=0'` behaves like `--ignore` for the
+scoring math (that file no longer moves the overall number) but the file
+still gets fully classified and shown, rather than skipped.
+
 ### In GitHub Actions
 
 ```yaml
