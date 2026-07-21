@@ -3,6 +3,25 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.1] - 2026-07-21
+
+### Fixed
+
+- The composite GitHub Action (`action.yml`, shipped in 0.2.0 and
+  documented in the README as the primary CI integration path) had never
+  actually been run in a workflow -- only validated as syntactically
+  correct YAML. Added a `test-action` CI job that exercises it for real
+  via `uses: ./` against a synthetic trivial-then-substantive commit
+  pair, asserting the `min-score` gate actually fails on the trivial one
+  and passes on the substantive one.
+- Caught a real bug in the test itself before it ever reached CI, via a
+  local dry run in a throwaway clone: the first version used a `#`-prefixed
+  line in README.md as the "trivial" comment-only change, but `#` is a
+  Markdown *heading*, not a comment -- tree-sitter correctly scored it
+  100% substantive, which would have made the test assert the opposite of
+  what it meant to check. Fixed by using a throwaway `.py` file instead,
+  where `#` really is a comment.
+
 ## [0.6.0] - 2026-07-21
 
 ### Added

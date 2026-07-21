@@ -25,3 +25,62 @@ jobs:
 
       - name: Run tests
         run: pytest -v
+
+  test-action:
+    # Exercises action.yml for real via `uses: ./` -- this was shipped in
+    # v0.2.0 and, until now, only ever validated as syntactically-correct
+    # YAML, never actually run in a workflow. It's the primary CI
+    # integration path documented in the README, so an untested composite
+    # action is a real gap, not a hypothetical one.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create a trivial (comment-only) commit to diff against
+        # Uses a throwaway .py file, not README.md: a leading "#" is a
+        # comment in Python but a heading in Markdown, which tree-sitter
+        # correctly treats as real content, not something trivial -- an
+        # earlier version of this test used README.md and got a false
+        # 100.0 score for exactly that reason, caught in a local dry run
+        # before it ever reached CI.
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "CI"
+          printf '# trivial comment\n' > action_test_file.py
+          git add action_test_file.py
+          git commit -m "trivial comment-only change"
+
+      - name: Run action with no min-score (should just report)
+        uses: ./
+        with:
+          base: HEAD~1
+
+      - name: Run action with min-score against the trivial change (expect failure)
+        id: trivial_gate
+        continue-on-error: true
+        uses: ./
+        with:
+          base: HEAD~1
+          min-score: "50"
+
+      - name: Assert the gate actually failed on the trivial change
+        run: |
+          if [ "${{ steps.trivial_gate.outcome }}" != "failure" ]; then
+            echo "::error::Expected the min-score gate to fail on a comment-only change, got outcome '${{ steps.trivial_gate.outcome }}'"
+            exit 1
+          fi
+          echo "OK: gate correctly failed on a comment-only change."
+
+      - name: Create a substantive commit on top
+        run: |
+          echo "print('a genuinely new line of code')" >> action_test_file.py
+          git add action_test_file.py
+          git commit -m "substantive change"
+
+      - name: Run action with min-score against the substantive change (expect success)
+        uses: ./
+        with:
+          base: HEAD~1
+          min-score: "50"
