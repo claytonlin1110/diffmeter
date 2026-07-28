@@ -33,6 +33,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Iterable, Optional
 
+import pathspec
+
+from diffmeter.config import WeightMatchers, is_ignored, resolve_weight
 from diffmeter.languages import FALLBACK_MARKERS, detect_language, get_parser
 
 _BINARY_MARKER = b"\x00"
@@ -459,13 +462,30 @@ def score_file(
 FilePair = tuple[str, Optional[bytes], Optional[bytes]]
 
 
-def score_diff(file_pairs: Iterable[FilePair], max_workers: Optional[int] = None) -> DiffScore:
+def score_diff(
+    file_pairs: Iterable[FilePair],
+    max_workers: Optional[int] = None,
+    *,
+    matcher: Optional[pathspec.PathSpec] = None,
+    weight_matchers: Optional[WeightMatchers] = None,
+) -> DiffScore:
     """Score a whole diff: an iterable of (path, base_content, head_content).
 
     Move detection is pooled across every file passed in here (see the
     module docstring) -- a function moved from one file to another in the
     same diff is recognized as moved on both sides, not scored as 100% new
     in one file and 100% deleted in the other.
+
+    `matcher`/`weight_matchers` (see diffmeter.config.build_matcher /
+    build_weight_matchers) apply the same ignore/weight rules used by the
+    CLI and score_pull_request, so library callers don't have to reach into
+    private scorer internals to get them. Unlike the CLI's local-scoring
+    path or score_pull_request -- both of which check `matcher` *before*
+    reading a file's content, so an ignored file's bytes are never fetched
+    -- callers here have necessarily already read `base_content`/
+    `head_content` to build each pair; matching against `matcher` still
+    skips the parsing/diffing work for that file, just not the read that
+    already happened to hand it to this function.
 
     Preparing each file (language detection, diffing, AST classification)
     is independent of every other file, so with max_workers > 1 (or None,
@@ -477,9 +497,17 @@ def score_diff(file_pairs: Iterable[FilePair], max_workers: Optional[int] = None
     order regardless of which thread finishes first.
     """
     pairs = list(file_pairs)
+
+    def _prep(pair: FilePair) -> _FilePrep:
+        path, base_content, head_content = pair
+        weight = resolve_weight(path, weight_matchers or [])
+        if is_ignored(path, matcher):
+            return _prepare_file(path, None, None, ignored=True, weight=weight)
+        return _prepare_file(path, base_content, head_content, weight=weight)
+
     if max_workers == 1 or len(pairs) <= 1:
-        preps = [_prepare_file(p, b, h) for p, b, h in pairs]
+        preps = [_prep(pair) for pair in pairs]
     else:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            preps = list(pool.map(lambda pair: _prepare_file(*pair), pairs))
+            preps = list(pool.map(_prep, pairs))
     return _finalize_diff(preps)

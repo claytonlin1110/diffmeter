@@ -235,6 +235,21 @@ for f in result.files:
 result = score_pull_request(parse_pr_reference("owner/repo#123"))
 ```
 
+`score_diff` also takes the same `matcher`/`weight_matchers` the CLI builds
+from `--ignore`/`--weight` (see `diffmeter.build_matcher` /
+`diffmeter.build_weight_matchers`), so library callers get the same
+ignore/weight rules without reaching into private internals:
+
+```python
+from diffmeter import build_matcher, build_weight_matchers, score_diff
+
+result = score_diff(
+    pairs,
+    matcher=build_matcher(["*.lock", "dist/**"]),
+    weight_matchers=build_weight_matchers([("*.md", 0.3)]),
+)
+```
+
 ## How it works
 
 For each changed file, diffmeter:

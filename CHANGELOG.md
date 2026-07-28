@@ -3,6 +3,30 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.0] - 2026-07-28
+
+### Added
+
+- `score_diff()` now accepts the same `matcher`/`weight_matchers` params
+  `score_pull_request()` already had, built via `diffmeter.build_matcher` /
+  `diffmeter.build_weight_matchers`. Previously the only public multi-file
+  entry point without ignore/weight support was `score_diff` itself --
+  the CLI's local-scoring path and `score_pull_request` both had it (via
+  private scorer internals the CLI and github_pr.py each called directly),
+  but a library caller going through the documented top-level `score_diff`
+  API had no way to reach either feature short of doing the same thing.
+
+### Notes
+
+- Unlike the CLI's local-scoring path and `score_pull_request` -- both of
+  which check a path against `matcher` *before* reading that file's
+  content, so an ignored file's bytes are never fetched -- `score_diff`
+  callers have necessarily already read `base_content`/`head_content` to
+  build each pair before calling it. Passing `matcher` here still skips the
+  parsing/diffing work for a matched file, just not the read that already
+  happened to hand its bytes to this function; documented on `score_diff`
+  itself rather than left to be discovered as a surprise.
+
 ## [0.7.1] - 2026-07-28
 
 ### Fixed

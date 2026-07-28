@@ -1,3 +1,4 @@
+from diffmeter.config import build_matcher, build_weight_matchers
 from diffmeter.scorer import DiffScore, score_diff, score_file
 
 
@@ -117,6 +118,34 @@ def test_score_diff_max_workers_one_matches_default_concurrency_result():
     sequential = score_diff(pairs, max_workers=1)
     concurrent = score_diff(pairs, max_workers=4)
     assert [f.score for f in sequential.files] == [f.score for f in concurrent.files]
+
+
+def test_score_diff_matcher_excludes_file_without_scoring_it():
+    pairs = [
+        ("a.py", b"x = 1\n", b"x = 2\n"),
+        ("vendor/lib.py", b"x = 1\n", b"x = 1\n# noise\n"),
+    ]
+    matcher = build_matcher(["vendor/**"])
+    result = score_diff(pairs, matcher=matcher)
+    by_path = {f.path: f for f in result.files}
+    assert by_path["vendor/lib.py"].ignored is True
+    assert by_path["vendor/lib.py"].score is None
+    # Only a.py's fully-substantive change counts toward the aggregate.
+    assert result.overall_score == 100.0
+
+
+def test_score_diff_weight_matchers_affect_overall_score_not_file_score():
+    pairs = [
+        ("a.py", b"x = 1\n", b"x = 2\n"),  # 100% substantive
+        ("b.py", b"y = 1\n", b"y = 1\n# note\n"),  # 0% substantive (pure comment add)
+    ]
+    weight_matchers = build_weight_matchers([("b.py", 0.0)])
+    result = score_diff(pairs, weight_matchers=weight_matchers)
+    by_path = {f.path: f for f in result.files}
+    assert by_path["b.py"].score == 0.0  # file's own score is unaffected by weight
+    assert by_path["b.py"].weight == 0.0
+    # b.py is weighted to zero, so only a.py's 100% counts toward the aggregate.
+    assert result.overall_score == 100.0
 
 
 def test_pure_reorder_is_detected_as_moved_not_new():
