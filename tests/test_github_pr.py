@@ -79,13 +79,22 @@ def test_score_pull_request_scores_across_added_modified_removed_files():
         ]
     ).encode()
 
+    # Each file's content is deliberately distinct (not just "def X(): return N"
+    # repeated) so that whole-diff move detection -- which pools candidate
+    # lines across every file, not just within one -- doesn't coincidentally
+    # match an unrelated line shared between two of these fixtures. An
+    # earlier version of this fixture reused "return 1" in all three files,
+    # which is exactly the kind of coincidental collision the docstring on
+    # _find_moved_lines_global warns about, and it started failing the
+    # moment cross-file matching landed -- not a bug in the matching, but a
+    # lazy fixture.
     routes = {
         "https://api.github.com/repos/acme/widgets/pulls/7/files": files_payload,
         "https://api.github.com/repos/acme/widgets/pulls/7": pr_payload,
-        "https://raw.githubusercontent.com/acme/widgets/head456/new_file.py": b"def f():\n    return 1\n",
-        "https://raw.githubusercontent.com/acme/widgets/base123/changed.py": b"def g():\n    return 1\n",
-        "https://raw.githubusercontent.com/acme/widgets/head456/changed.py": b"def g():\n    return 2\n",
-        "https://raw.githubusercontent.com/acme/widgets/base123/gone.py": b"def h():\n    return 1\n",
+        "https://raw.githubusercontent.com/acme/widgets/head456/new_file.py": b"def f():\n    return 111\n",
+        "https://raw.githubusercontent.com/acme/widgets/base123/changed.py": b"def g():\n    return 222\n",
+        "https://raw.githubusercontent.com/acme/widgets/head456/changed.py": b"def g():\n    return 333\n",
+        "https://raw.githubusercontent.com/acme/widgets/base123/gone.py": b"def h():\n    return 444\n",
     }
 
     with patch("urllib.request.urlopen", side_effect=_fake_urlopen(routes)):
@@ -258,6 +267,40 @@ def test_urlopen_with_retry_gives_up_after_max_retries():
             with pytest.raises(urllib.error.HTTPError):
                 _urlopen_with_retry(_request(), max_retries=2)
     assert mock_open.call_count == 3  # 1 initial attempt + 2 retries
+
+
+def test_score_pull_request_detects_function_extracted_to_a_new_file():
+    """score_pull_request routes through the same shared _finalize_diff as
+    score_diff, so cross-file move detection should work here too -- this
+    pins down that the PR-scoring code path actually wires into it, not
+    just the core scorer function."""
+    ref = PullRequestRef("acme", "widgets", 12)
+    extracted_function = b"def helper_one():\n    return 'a value long enough to be matched'\n"
+
+    pr_payload = json.dumps({"base": {"sha": "b"}, "head": {"sha": "h"}}).encode()
+    files_payload = json.dumps(
+        [
+            {"filename": "a.py", "status": "modified", "previous_filename": None},
+            {"filename": "b.py", "status": "added", "previous_filename": None},
+        ]
+    ).encode()
+
+    routes = {
+        "https://api.github.com/repos/acme/widgets/pulls/12/files": files_payload,
+        "https://api.github.com/repos/acme/widgets/pulls/12": pr_payload,
+        "https://raw.githubusercontent.com/acme/widgets/b/a.py": extracted_function + b"\ndef other():\n    pass\n",
+        "https://raw.githubusercontent.com/acme/widgets/h/a.py": b"def other():\n    pass\n",
+        "https://raw.githubusercontent.com/acme/widgets/h/b.py": extracted_function,
+    }
+
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen(routes)):
+        result = score_pull_request(ref)
+
+    by_path = {f.path: f for f in result.files}
+    assert by_path["b.py"].moved > 0
+    assert by_path["b.py"].score == 0.0
+    assert "another file" in by_path["b.py"].note
+    assert result.overall_score == 0.0
 
 
 def test_score_pull_request_applies_weight_matchers():

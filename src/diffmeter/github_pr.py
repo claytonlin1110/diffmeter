@@ -17,7 +17,7 @@ from typing import Optional
 import pathspec
 
 from diffmeter.config import WeightMatchers, is_ignored, resolve_weight
-from diffmeter.scorer import DiffScore, FileScore, score_file
+from diffmeter.scorer import DiffScore, _FilePrep, _finalize_diff, _prepare_file
 
 _API_ROOT = "https://api.github.com"
 _RAW_ROOT = "https://raw.githubusercontent.com"
@@ -138,25 +138,25 @@ def _fetch_blob(owner: str, repo: str, sha: str, path: str) -> Optional[bytes]:
         raise GitHubError(f"Could not reach raw.githubusercontent.com: {exc.reason}") from exc
 
 
-def _score_pr_entry(
+def _prepare_pr_entry(
     ref: PullRequestRef,
     base_sha: str,
     head_sha: str,
     entry: dict,
     matcher: Optional[pathspec.PathSpec],
     weight_matchers: Optional[WeightMatchers],
-) -> FileScore:
+) -> _FilePrep:
     status = entry["status"]  # "added" | "removed" | "modified" | "renamed" | "copied" | "changed"
     path = entry["filename"]
     weight = resolve_weight(path, weight_matchers or [])
 
     if is_ignored(path, matcher):
-        return score_file(path, None, None, ignored=True, weight=weight)
+        return _prepare_file(path, None, None, ignored=True, weight=weight)
 
     previous_path = entry.get("previous_filename") or path
     base_content = None if status == "added" else _fetch_blob(ref.owner, ref.repo, base_sha, previous_path)
     head_content = None if status == "removed" else _fetch_blob(ref.owner, ref.repo, head_sha, path)
-    return score_file(path, base_content, head_content, weight=weight)
+    return _prepare_file(path, base_content, head_content, weight=weight)
 
 
 def score_pull_request(
@@ -172,10 +172,14 @@ def score_pull_request(
     here -- there's no local checkout to read it from in this mode, so both
     must be passed in explicitly by the caller.
 
-    Per-file blob fetching and scoring runs concurrently (max_workers
-    threads, default 8): this is dominated by network round-trips to
-    raw.githubusercontent.com, not CPU, so a PR touching many files no
-    longer pays for each file serially. Pass max_workers=1 to disable.
+    Per-file blob fetching and AST classification runs concurrently
+    (max_workers threads, default 8): this is dominated by network
+    round-trips to raw.githubusercontent.com, not CPU, so a PR touching
+    many files no longer pays for each file serially. Move detection (see
+    diffmeter.scorer's module docstring) then runs once across every
+    file's results, so a function moved to a new file in the same PR is
+    recognized as moved rather than scored as 100% new/100% deleted. Pass
+    max_workers=1 to disable the per-file concurrency.
     """
     pr = _get_json(f"{_API_ROOT}/repos/{ref.owner}/{ref.repo}/pulls/{ref.number}")
     base_sha = pr["base"]["sha"]
@@ -183,14 +187,14 @@ def score_pull_request(
 
     entries = _fetch_pr_files(ref)
     if max_workers == 1 or len(entries) <= 1:
-        results = [_score_pr_entry(ref, base_sha, head_sha, e, matcher, weight_matchers) for e in entries]
+        preps = [_prepare_pr_entry(ref, base_sha, head_sha, e, matcher, weight_matchers) for e in entries]
     else:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            results = list(
+            preps = list(
                 pool.map(
-                    lambda e: _score_pr_entry(ref, base_sha, head_sha, e, matcher, weight_matchers),
+                    lambda e: _prepare_pr_entry(ref, base_sha, head_sha, e, matcher, weight_matchers),
                     entries,
                 )
             )
 
-    return DiffScore(files=results)
+    return _finalize_diff(preps)

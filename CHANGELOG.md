@@ -3,6 +3,50 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0] - 2026-07-21
+
+### Added
+
+- Cross-file move detection: extracting a function to a new file (or
+  moving code between any two files in the same diff) is now recognized
+  as **moved** rather than scored as 100% new content in one file and
+  100% deleted in the other. Previously move detection only matched
+  within a single file. Verified end-to-end via the CLI on a real
+  extract-to-new-file scenario before writing any tests.
+
+### Changed
+
+- Scoring now runs in two phases internally: `_prepare_file` classifies
+  one file's changed lines (language detection, line-diffing, AST
+  classification) independently of every other file -- still the
+  parallelizable, CPU-heavy part -- and a single `_finalize_diff` pass
+  then pools every file's candidate lines and matches moves across the
+  *whole* diff at once. `score_diff` and `score_pull_request` both use
+  this now. `score_file` (scoring one file alone) is unchanged in
+  behavior and still same-file-only, since there's nothing else to pool
+  against when only one file is in play -- confirmed by the full existing
+  test suite passing unmodified against the new implementation.
+
+### Notes
+
+- Real trade-off that comes with widening the matching pool: two
+  *unrelated* files that happen to share an identical line at least 8
+  characters long -- one adding it, the other removing it -- now read as
+  a move. Documented in the README's limitations section and pinned down
+  with a dedicated test, not discovered later as a surprise bug report.
+- Caught (before it shipped) that an *existing* PR-scoring test fixture
+  reused `return 1` as filler content across three different fake files;
+  once matching went global, that coincidental repetition tripped the
+  exact trade-off above and failed the test. Fixed the fixture to use
+  distinct content per file -- the fixture was the problem, not the new
+  matching logic.
+- Two of my own hand-computed expected values in new tests were wrong on
+  the first pass (once for a partially-new file miscounted as fully
+  moved, once for not knowing `moved` counts both sides of a match, so a
+  single swapped line is `moved == 2` not `1`) -- verified actual output
+  before fixing the assertions, same as every other arithmetic slip this
+  project's tests have caught.
+
 ## [0.6.1] - 2026-07-21
 
 ### Fixed

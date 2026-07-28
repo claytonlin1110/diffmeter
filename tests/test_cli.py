@@ -181,3 +181,24 @@ def test_cli_weight_flag_overrides_config_on_same_pattern(repo_with_readme: Path
     payload = json.loads(result.output)
     by_path = {f["path"]: f for f in payload["files"]}
     assert by_path["README.md"]["weight"] == 0.9
+
+
+def test_cli_detects_function_extracted_to_a_new_file(repo: Path):
+    extracted_function = "def helper_one():\n    return 'a value long enough to be matched'\n"
+    (repo / "a.py").write_text(extracted_function + "\ndef other():\n    pass\n")
+    _git(repo, "commit", "-q", "-am", "add a function to extract")
+
+    (repo / "a.py").write_text("def other():\n    pass\n")
+    (repo / "b.py").write_text(extracted_function)
+    _git(repo, "add", "a.py", "b.py")
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["score", str(repo), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    by_path = {f["path"]: f for f in payload["files"]}
+
+    assert by_path["b.py"]["moved"] > 0
+    assert by_path["b.py"]["score"] == 0.0
+    assert "another file" in by_path["b.py"]["note"]
+    assert payload["overall_score"] == 0.0

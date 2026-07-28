@@ -20,7 +20,7 @@ from diffmeter.config import (
 )
 from diffmeter.git_utils import ChangedFile, GitError, changed_files, is_git_repo, resolve_side
 from diffmeter.github_pr import GitHubError, parse_pr_reference, score_pull_request
-from diffmeter.scorer import DiffScore, FileScore, score_file
+from diffmeter.scorer import DiffScore, _finalize_diff, _prepare_file
 
 
 @click.group()
@@ -136,21 +136,21 @@ def score(
         except GitError as exc:
             raise click.ClickException(str(exc))
 
-        def _score_local(cf: ChangedFile) -> FileScore:
+        def _prepare_local(cf: ChangedFile):
             weight = resolve_weight(cf.display_path, weight_matchers)
             if is_ignored(cf.display_path, matcher):
-                return score_file(cf.display_path, None, None, ignored=True, weight=weight)
+                return _prepare_file(cf.display_path, None, None, ignored=True, weight=weight)
             base_content = resolve_side(repo, base, cf.base_path)
             head_content = resolve_side(repo, head, cf.head_path)
-            return score_file(cf.display_path, base_content, head_content, weight=weight)
+            return _prepare_file(cf.display_path, base_content, head_content, weight=weight)
 
         if jobs == 1 or len(files) <= 1:
-            results = [_score_local(cf) for cf in files]
+            preps = [_prepare_local(cf) for cf in files]
         else:
             with ThreadPoolExecutor(max_workers=jobs) as pool:
-                results = list(pool.map(_score_local, files))
+                preps = list(pool.map(_prepare_local, files))
 
-        diff_score = DiffScore(files=results)
+        diff_score = _finalize_diff(preps)
 
     if as_json:
         _print_json(diff_score)

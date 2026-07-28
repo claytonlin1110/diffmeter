@@ -232,11 +232,14 @@ For each changed file, diffmeter:
    **substantive**.
 4. Checks whether any line that looks substantive on its own is actually an
    exact (whitespace-normalized) content match for a line removed/added
-   elsewhere in the same file's diff — i.e. code that **moved** rather than
-   code that's new. A pure reorder of two lines now scores close to 0
-   instead of the 100 it would've gotten from independently classifying
-   each line. This is matched by content, not position or a real AST
-   tree-diff, so it has real limits — see below.
+   elsewhere in the diff — i.e. code that **moved** rather than code that's
+   new. This is checked across every file in the diff at once, not just
+   within one file, so extracting a function into a new file scores near 0
+   instead of 100% new + 100% deleted. A pure reorder of two lines, or a
+   move to another file, now scores close to 0 instead of the 100 it
+   would've gotten from independently classifying each line. This is
+   matched by content, not position or a real AST tree-diff, so it has
+   real limits — see below.
 5. Score = substantive changed lines ÷ total changed lines, as a percentage.
 
 Deletions count the same as additions — deleting a real function is a
@@ -261,16 +264,22 @@ JavaScript/TypeScript, Go, Rust, Java, C/C++, C#, Ruby, PHP, Bash, and
   verbose-but-real code; diffmeter is a signal, not a substitute for
   review.
 - Move detection is content-matching, not a real AST tree-diff: it catches
-  lines that were relocated unchanged (reordering, cut-and-paste), but it's
-  same-file only (a move across two files isn't detected), requires an
-  exact whitespace-normalized match, and ignores short lines (under 8
-  characters) to avoid false-positive matches on things like `}` or
-  `else:`. A change that reformats a line's *content* (not just its
-  position) — e.g. reflowing a long call across multiple lines — still
-  reads as new content, because it genuinely is different text, even
-  though a human would call it the same logic reshaped. A full structural
-  (AST-level) tree-diff would handle that case too; it's a real
-  undertaking and still on the roadmap (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+  lines that were relocated unchanged (reordering, cut-and-paste, moving a
+  function to a different file), but requires an exact whitespace-normalized
+  match, ignores short lines (under 8 characters) to avoid false-positive
+  matches on things like `}` or `else:`, and — because matching now pools
+  candidate lines across every file in a multi-file diff — two *unrelated*
+  files that happen to share an identical long-enough line, one adding it
+  and the other removing it, will be misread as a move. This is a real,
+  known trade-off, not a bug: it only affects `score_diff`/`score_pull_request`
+  scoring multiple files at once (`score_file` on a single file never had
+  other files' lines to coincidentally collide with). A change that
+  reformats a line's *content* (not just its position) — e.g. reflowing a
+  long call across multiple lines — still reads as new content, because it
+  genuinely is different text, even though a human would call it the same
+  logic reshaped. A full structural (AST-level) tree-diff would handle
+  that case too; it's a real undertaking and still on the roadmap (see
+  [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## License
 

@@ -64,22 +64,25 @@ Noted here so effort isn't duplicated:
 
 - **Full structural (AST tree) diffing.** The scorer line-diffs old vs.
   new content (`difflib`) and classifies each changed line independently;
-  `_find_moved_lines` in `scorer.py` layers on exact-content move
-  detection to catch pure reordering, but that's a content-matching
-  heuristic, not a real tree-diff. It won't catch a moved block whose
-  formatting also changed. A real tree-diff (matching AST nodes across the
-  edit, e.g. GumTree-style) would handle that, at the cost of meaningfully
-  more complexity. Worth doing once the simpler approach's limits are
-  actually felt in practice, not before.
-- **Cross-file move detection.** `_find_moved_lines` only matches lines
-  within the *same* file's added/removed sets, so extracting a function to
-  a new file scores as 100% new on both sides instead of being recognized
-  as a move. Fixing this means moving the matching pass up from per-file
-  `score_file` to the multi-file level (`score_diff`/`score_pull_request`)
-  so it can pool candidate lines across all changed files at once --
-  doable without a full tree-diff, but touches the scoring pipeline's
-  architecture (all three per-file call sites) more than a purely additive
-  change, so it deserves its own careful pass rather than being bolted on.
+  `_find_moved_lines_global` in `scorer.py` layers on exact-content move
+  detection (reordering, and now cross-file moves too -- see below) to
+  approximate this, but that's a content-matching heuristic, not a real
+  tree-diff. It won't catch a moved block whose formatting also changed
+  (e.g. reflowing a call across lines). A real tree-diff (matching AST
+  nodes across the edit, e.g. GumTree-style) would handle that, at the
+  cost of meaningfully more complexity. Worth doing once the simpler
+  approach's limits are actually felt in practice, not before.
+- ~~Cross-file move detection~~ — done: scoring now happens in two phases
+  (`_prepare_file` per file, independent and parallelizable, then one
+  `_finalize_diff` pass across every file's results), so a function
+  extracted to a new file is recognized as moved on both sides instead of
+  scoring as 100% new + 100% deleted. `score_file` on a single file still
+  can't detect this (nothing else to pool against by definition); use
+  `score_diff`/`score_pull_request` for multi-file diffs. Real trade-off
+  that came with widening the matching pool: two *unrelated* files that
+  happen to share an identical long-enough line, one adding it and the
+  other removing it, now read as a move -- documented in the README's
+  limitations section, not silently swept under the rug.
 - ~~Per-language weighting~~ — done: see `--weight` / the `.diffmeter.toml`
   `[weights]` table (README has usage). It's actually per-*path-pattern*
   weighting rather than per-language, which turned out more flexible (lets

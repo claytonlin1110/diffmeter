@@ -193,6 +193,82 @@ def test_default_weight_does_not_change_a_files_own_score():
     assert result.weight == 0.3
 
 
+def test_score_file_does_not_detect_moves_across_files():
+    """score_file only ever sees one file -- there's nothing else to pool
+    against -- so a line removed from one file and added, unchanged, to
+    another must NOT be detected as moved when each is scored alone. This
+    is the behavior score_diff/score_pull_request improve on by pooling
+    candidates across every file in the diff at once."""
+    moved_line = b"    return 'a value long enough to be matched as moved'\n"
+    old_file = score_file("old.py", b"def f():\n" + moved_line, b"def f():\n")
+    new_file = score_file("new.py", None, b"def g():\n" + moved_line)
+    assert old_file.moved == 0
+    assert new_file.moved == 0
+    assert new_file.score == 100.0
+
+
+def test_score_diff_detects_a_function_extracted_to_a_new_file():
+    # new.py's content is exactly the function body removed from old.py (plus
+    # nothing else), so both of new.py's lines match something removed from
+    # old.py -- a clean "fully moved" case with a predictable 0.0 score,
+    # rather than a mix of moved + genuinely-new lines.
+    extracted_function = (
+        b"def helper_one():\n    return 'a value long enough to be matched'\n"
+    )
+    pairs = [
+        ("old.py", extracted_function + b"\ndef other():\n    pass\n", b"def other():\n    pass\n"),
+        ("new.py", None, extracted_function),
+    ]
+    result = score_diff(pairs)
+    by_path = {f.path: f for f in result.files}
+
+    # new.py: both of its 2 added lines matched something removed from
+    # old.py, so moved == 2 (no removed lines of its own to also count).
+    assert by_path["new.py"].moved == 2
+    assert by_path["new.py"].score == 0.0
+    assert "another file" in by_path["new.py"].note
+
+    # old.py: 2 of its 3 removed lines (def + return; the blank separator
+    # doesn't match anything) matched new.py's added lines.
+    assert by_path["old.py"].moved == 2
+    assert "another file" in by_path["old.py"].note
+
+    # The whole point: this used to score as 100% new + (mostly) deleted.
+    assert result.overall_score == 0.0
+
+
+def test_score_diff_same_file_move_note_does_not_mention_another_file():
+    # Sanity check that the "(N to/from another file)" detail only appears
+    # for genuinely cross-file matches, not every move. `moved` counts both
+    # sides of a match (the added-side line and the removed-side line), so
+    # one swapped line contributes moved == 2, not 1.
+    base = b"a = 1\nunique_reorderable_line_content_here\nb = 2\n"
+    head = b"unique_reorderable_line_content_here\na = 1\nb = 2\n"
+    result = score_diff([("f.py", base, head)])
+    assert result.files[0].moved == 2
+    assert "another file" not in result.files[0].note
+
+
+def test_cross_file_matching_can_misfire_on_coincidental_identical_lines():
+    """Documented, deliberate trade-off (see _find_moved_lines_global's
+    docstring): two files that happen to share an identical unrelated line
+    -- one adding it, another removing it -- are indistinguishable from a
+    real move once matching is pooled across the whole diff. This test
+    exists so the behavior is pinned down and explained, not rediscovered
+    as a surprise bug report."""
+    coincidental_line = b"    logger.info('starting the request handler')\n"
+    pairs = [
+        # removes the line as part of an unrelated cleanup
+        ("service_a.py", b"def handle():\n" + coincidental_line + b"    pass\n", b"def handle():\n    pass\n"),
+        # independently adds the *same* line -- not a real move
+        ("service_b.py", b"def handle():\n    pass\n", b"def handle():\n" + coincidental_line + b"    pass\n"),
+    ]
+    result = score_diff(pairs)
+    by_path = {f.path: f for f in result.files}
+    assert by_path["service_a.py"].moved == 1
+    assert by_path["service_b.py"].moved == 1
+
+
 def test_overall_score_unweighted_when_no_weights_given():
     pairs = [
         ("a.py", b"x = 1\n", b"x = 1\n# comment\n"),  # trivial, drags score down
