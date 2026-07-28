@@ -3,6 +3,22 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.1] - 2026-07-28
+
+### Changed
+
+- The objective merge/close mechanism shipped in 0.9.0 is now actually live,
+  not just present as code: `main` has branch protection requiring the
+  `required-checks` job (strict mode -- a PR branch must be up to date with
+  `main` to merge; `enforce_admins` on, so even the repo owner can't
+  override a failing check via the merge button), and repo-level auto-merge
+  is enabled so `pr-policy.yml`'s `enable-auto-merge` job can actually take
+  effect. No code changed -- this is a repo settings change, done
+  deliberately and separately from the 0.9.0 diff as planned, not a side
+  effect of it. Direct pushes to `main` (this project's normal workflow so
+  far) are unaffected -- branch protection here only gates PR merges, not
+  raw pushes.
+
 ## [0.9.0] - 2026-07-28
 
 ### Added
