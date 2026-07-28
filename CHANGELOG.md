@@ -3,6 +3,28 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.1] - 2026-07-28
+
+### Fixed
+
+- `--min-score` treated a diff with nothing scoreable -- `overall_score is
+  None`, meaning either an empty diff or every changed file excluded via
+  `--ignore`/`--weight` -- the same as a failing score, exiting 1 with
+  "overall score None is below --min-score X". This directly undermined
+  `--ignore`'s whole purpose as a CI gate: a PR that only touched an
+  excluded path (a lockfile, vendored code) would fail the gate for being
+  "too trivial" instead of correctly having nothing to penalize. A plain
+  `diffmeter score --min-score 50` against zero uncommitted changes failed
+  the exact same way. `overall_score is None` now skips the gate (exit 0)
+  instead of failing it.
+- Caught by CI itself, not a local test: the 0.7.1 release added a
+  `test-action` step asserting that excluding a trivial file via `ignore`
+  lets a `min-score` gate pass, and that step failed on push -- the gate
+  was failing on the *ignored* file's missing score, not on any real
+  triviality. Two regression tests now cover it directly (an empty diff,
+  and a diff where the only changed file is ignored) rather than relying
+  on CI to catch a repeat.
+
 ## [0.8.0] - 2026-07-28
 
 ### Added

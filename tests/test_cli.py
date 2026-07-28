@@ -58,6 +58,27 @@ def test_cli_min_score_gate_passes_on_substantive_change(repo: Path):
     assert result.exit_code == 0
 
 
+def test_cli_min_score_gate_does_not_fail_on_empty_diff(repo: Path):
+    # No uncommitted changes at all -- overall_score is None (nothing to
+    # measure), which must not be treated the same as a low score. A CI job
+    # gating an unrelated empty comparison shouldn't fail just because there
+    # was nothing to score.
+    runner = CliRunner()
+    result = runner.invoke(main, ["score", str(repo), "--min-score", "50"])
+    assert result.exit_code == 0
+
+
+def test_cli_min_score_gate_does_not_fail_when_only_ignored_files_changed(repo: Path):
+    # This is the whole point of --ignore in a CI gate: a change that only
+    # touches excluded paths must pass, not fail for having "no score".
+    (repo / "a.py").write_text("def f():\n    # just a note\n    return 1\n")
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["score", str(repo), "--min-score", "50", "--ignore", "a.py"]
+    )
+    assert result.exit_code == 0
+
+
 def test_cli_compares_two_commits(repo: Path):
     (repo / "a.py").write_text("def f():\n    return 2\n")
     _git(repo, "commit", "-q", "-am", "change return value")

@@ -121,6 +121,12 @@ Gate a CI job on it — fail the build if a PR is (say) more than 70% trivial:
 diffmeter score --base origin/main --min-score 30
 ```
 
+A diff with nothing scoreable — no changes at all, or every changed file
+excluded via `--ignore`/`--weight` — always passes `--min-score` rather than
+failing for lack of a score. Otherwise a PR that only touches, say, a
+lockfile would fail the gate for being "too trivial," exactly backwards from
+what `--ignore` is for.
+
 ### Excluding files from scoring
 
 Lockfiles, vendored code, and generated/minified bundles shouldn't count

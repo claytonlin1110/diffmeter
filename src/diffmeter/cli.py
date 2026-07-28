@@ -49,7 +49,9 @@ def main() -> None:
     type=float,
     default=None,
     help="Exit with status 1 if the overall score is below this threshold (0-100). "
-    "Useful as a CI gate against comment-only or whitespace-only PRs.",
+    "Useful as a CI gate against comment-only or whitespace-only PRs. A diff with "
+    "nothing scoreable (no changes, or every changed file excluded via --ignore/"
+    "--weight) always passes the gate rather than failing on a missing score.",
 )
 @click.option(
     "--pr",
@@ -158,7 +160,16 @@ def score(
         _print_table(diff_score)
 
     overall = diff_score.overall_score
-    if min_score is not None and (overall is None or overall < min_score):
+    if min_score is None:
+        return
+    if overall is None:
+        # Nothing scoreable: either an empty diff, or every changed file was
+        # excluded (--ignore / --weight 0). Neither is evidence of a
+        # trivial/low-effort change, so the gate has nothing to fail on --
+        # in particular, a PR that only touches ignored paths (exactly what
+        # --ignore is for) must not be penalized for that.
+        click.echo("\nNo scoreable changes; --min-score gate skipped.", err=True)
+    elif overall < min_score:
         click.echo(f"\nFAIL: overall score {overall} is below --min-score {min_score}", err=True)
         sys.exit(1)
 
