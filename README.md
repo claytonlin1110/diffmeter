@@ -193,7 +193,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # diffmeter needs history to diff against the base branch
-      - uses: claytonlin1110/diffmeter@v0.2.0
+      - uses: claytonlin1110/diffmeter@v0.9.1
         with:
           base: origin/${{ github.base_ref }}
           min-score: 30
@@ -203,7 +203,7 @@ jobs:
 pattern per line:
 
 ```yaml
-      - uses: claytonlin1110/diffmeter@v0.2.0
+      - uses: claytonlin1110/diffmeter@v0.9.1
         with:
           base: origin/${{ github.base_ref }}
           min-score: 30
