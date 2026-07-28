@@ -24,7 +24,56 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        run: pytest -v
+        # --cov enforces pyproject.toml's [tool.coverage.report] fail_under
+        # -- objective merge criterion #1 (see CONTRIBUTING.md): a PR that
+        # drops coverage below the floor fails this job the same way a
+        # failing assertion would, no maintainer judgment call needed.
+        run: pytest -v --cov --cov-report=term-missing
+
+  diffmeter-self-score:
+    # Objective merge criterion #2: diffmeter scores its own diff, built
+    # from this PR's own code (not a prior release), so the gate always
+    # reflects what's actually about to be merged. Threshold of 30 matches
+    # the README's own documented CI-gate example, not a number invented
+    # just for this job.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install diffmeter from this PR's own code
+        run: pip install -e .
+
+      - name: Score this PR's diff against its base
+        run: diffmeter score --base "origin/${{ github.base_ref }}" --min-score 30
+
+  required-checks:
+    # Single aggregator so branch protection only has to require one named
+    # check instead of every individual matrix cell -- see CONTRIBUTING.md's
+    # "Objective merge criteria" section for what this job's success
+    # actually certifies.
+    if: always()
+    needs: [test, test-action, diffmeter-self-score]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm every required job succeeded
+        # Bracket notation, not `needs.test-action.result` -- job IDs with
+        # hyphens aren't safe to assume work with dot notation in GitHub's
+        # expression syntax, and a silent expression-parse failure here
+        # would defeat the whole point of this gate.
+        run: |
+          for result in "${{ needs['test'].result }}" "${{ needs['test-action'].result }}" "${{ needs['diffmeter-self-score'].result }}"; do
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "::error::A required job did not succeed: $result"
+              exit 1
+            fi
+          done
 
   test-action:
     # Exercises action.yml for real via `uses: ./` -- this was shipped in

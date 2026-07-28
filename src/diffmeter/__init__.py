@@ -13,7 +13,7 @@ from diffmeter.config import (
 from diffmeter.github_pr import GitHubError, PullRequestRef, parse_pr_reference, score_pull_request
 from diffmeter.scorer import DiffScore, FileScore, Verdict, score_diff, score_file
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 
 __all__ = [
     "ConfigError",

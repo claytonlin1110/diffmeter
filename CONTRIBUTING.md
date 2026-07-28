@@ -58,6 +58,39 @@ test case.
 - `pytest` should pass locally before you open the PR — CI runs it too, but
   catching it locally is faster for everyone.
 
+## Objective merge criteria
+
+A PR merges or closes based on fixed, automated checks — not a maintainer's
+read of it. Every check below runs in `.github/workflows/ci.yml` /
+`pr-policy.yml` against the PR's own code, not a prior release:
+
+- **Tests pass** across the full OS/Python matrix (`test` job).
+- **Coverage doesn't drop below the floor** set in `pyproject.toml`'s
+  `[tool.coverage.report] fail_under` (currently 92%, a few points under the
+  94% baseline it was set from, as headroom for cross-OS variance rather
+  than a target to coast at).
+- **diffmeter's own `--min-score` gate**, run against the PR's diff using
+  diffmeter built from that PR's own code (`diffmeter-self-score` job,
+  threshold 30 — the same number the README's own CI-gate example uses).
+- The composite Action (`test-action` job) still actually runs, not just
+  parses as valid YAML.
+
+Once every job above succeeds, `pr-policy.yml` enables GitHub's native
+auto-merge on the PR — it doesn't merge immediately, it just tells GitHub to
+merge once required status checks are green, which is what actually
+performs the merge. A PR that never gets there closes automatically after 7
+days stale + 3 days grace (`close-stale-prs` in `pr-policy.yml`), rather than
+sitting open for a human to triage.
+
+**A known limitation, not a design choice being hidden:** GitHub gives a PR
+opened from a fork a read-only `GITHUB_TOKEN` by design, so
+`enable-auto-merge` can't set the auto-merge flag on a fork PR — only a
+maintainer running `gh pr merge --auto` by hand (or a future bot with its
+own PAT) can. This isn't a workaround-able gap: letting an untrusted PR
+grant itself merge rights is exactly the vulnerability class GitHub's token
+scoping exists to prevent, so this project isn't going to try to route
+around it.
+
 ## Roadmap / known gaps
 
 Noted here so effort isn't duplicated:

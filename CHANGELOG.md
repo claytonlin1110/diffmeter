@@ -3,6 +3,47 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0] - 2026-07-28
+
+### Added
+
+- Objective, automated merge/close criteria for PRs to this repo (see
+  CONTRIBUTING.md's new "Objective merge criteria" section for the full
+  policy). Previously every PR was merged on a maintainer's read of it, like
+  any ordinary OSS project; now merging/closing is driven entirely by fixed
+  checks:
+  - A coverage floor (`[tool.coverage.report] fail_under = 92` in
+    `pyproject.toml`, a few points under the measured 94% baseline as
+    cross-OS headroom, not a target to coast at), enforced via `pytest --cov`
+    in the existing `test` matrix job.
+  - `diffmeter score --min-score 30` run against each PR's own diff, using
+    diffmeter built from that PR's own code -- a new `diffmeter-self-score`
+    CI job, dogfooding the exact tool this repo ships to gate its own PRs.
+  - A new `required-checks` aggregator job so branch protection only needs
+    to require one named check instead of every individual matrix cell.
+  - A new `pr-policy.yml` workflow: `enable-auto-merge` turns on GitHub's
+    native auto-merge for a PR as soon as it's opened (the actual merge
+    still waits for every required check to go green -- this only sets the
+    flag, it never runs PR code with elevated privileges); `close-stale-prs`
+    closes a PR automatically 10 days after it opens if it never passed
+    (7 days to go stale, 3 more grace).
+
+### Notes
+
+- Fork PRs get a read-only `GITHUB_TOKEN` from GitHub by design, so
+  `enable-auto-merge` can't set the auto-merge flag on them -- only a
+  maintainer running `gh pr merge --auto` by hand, or a future bot with its
+  own PAT, can. Documented as a known limitation in CONTRIBUTING.md, not
+  something worth routing around: doing so would mean letting an untrusted
+  PR grant itself merge rights, which is exactly the vulnerability class
+  GitHub's token scoping exists to prevent.
+- This only ships the mechanism as code (workflow files, coverage config,
+  policy docs). Actually requiring `required-checks` via branch protection
+  and enabling repo-level auto-merge are live GitHub settings changes, not
+  something in this diff -- those need a deliberate decision, not a side
+  effect of a code change, especially since they'd also end this project's
+  established direct-push-to-main workflow for anything going through a PR.
+
 ## [0.8.1] - 2026-07-28
 
 ### Fixed

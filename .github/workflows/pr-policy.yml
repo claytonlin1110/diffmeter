@@ -1,0 +1,68 @@
+name: PR merge policy
+
+# Enforces diffmeter's objective merge/close criteria (see CONTRIBUTING.md):
+# a PR merges itself once every required check in ci.yml passes, and closes
+# itself if it never does within a fixed window. Neither direction involves
+# a maintainer reading the PR and making a judgment call.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  schedule:
+    - cron: "17 6 * * *"
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  enable-auto-merge:
+    # Only sets the auto-merge flag -- GitHub itself withholds the actual
+    # merge until every required status check (see ci.yml's
+    # `required-checks` job) reports success. This is the safe, native
+    # mechanism: it never runs any code from the PR with elevated
+    # privileges, unlike a custom merge script would risk doing.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge for this PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # Fork PRs get a read-only GITHUB_TOKEN by GitHub's own design,
+          # regardless of the `permissions:` block above -- deliberately
+          # not something this workflow can (or should try to) work around,
+          # since doing so would let an untrusted PR grant itself merge
+          # rights. This only succeeds for same-repo PRs today; a fork PR
+          # needs a maintainer to run `gh pr merge --auto` by hand, or a
+          # future bot with its own PAT to take over this step.
+          gh pr merge --auto --squash "$PR_URL" \
+            || echo "::warning::Could not enable auto-merge automatically (likely a fork PR without write access to GITHUB_TOKEN). A maintainer must run 'gh pr merge --auto' manually for this PR."
+
+  close-stale-prs:
+    # The other half of "no maintainer discretion": a PR that hasn't merged
+    # -- meaning it hasn't passed every required check -- within a fixed
+    # window closes automatically instead of sitting open for a human to
+    # triage. 7 days to go stale, 3 more to close: enough time for a real
+    # contributor to push a fix, not indefinite.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          days-before-pr-stale: 7
+          days-before-pr-close: 3
+          stale-pr-message: >
+            This PR hasn't merged within 7 days, which means it hasn't yet
+            passed diffmeter's objective merge criteria (tests, the
+            coverage floor, and diffmeter's own --min-score gate on the
+            diff -- see CONTRIBUTING.md). It will close automatically in 3
+            more days unless it starts passing.
+          close-pr-message: >
+            Closing automatically: this PR did not meet diffmeter's
+            objective merge criteria within the review window. Reopen it
+            (or open a new PR) once it passes tests, the coverage floor,
+            and diffmeter's own --min-score gate on the diff.
