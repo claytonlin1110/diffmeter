@@ -3,6 +3,37 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.1] - 2026-07-28
+
+### Fixed
+
+- The composite GitHub Action (`action.yml`) had no way to pass `--ignore`
+  or `--weight` through to `diffmeter score` -- both shipped as CLI/library
+  features back in 0.4.0 and 0.6.0 and are documented in the README, but the
+  Action itself was never updated to expose them, so anyone using the
+  documented CI integration path had no way to reach either feature short of
+  dropping the Action for a raw `pip install` + CLI invocation. Added
+  `ignore`, `weight`, and `jobs` inputs; `ignore`/`weight` take one
+  gitignore-style pattern (or `PATTERN=NUMBER` pair, for weight) per line,
+  same as `.diffmeter.toml`'s list/table syntax.
+- The `test-action` CI job (added in 0.6.1 to actually exercise `action.yml`,
+  not just validate its YAML) now covers `ignore` too: a trivial
+  comment-only commit to a file matched by an `ignore` pattern must pass a
+  `min-score` gate that a matching *unignored* file already failed a step
+  earlier in the same job -- so the assertion is that exclusion, not
+  coincidence, is what made it pass.
+
+### Notes
+
+- The new `ignore`/`weight` inputs are newline-separated lists read into the
+  composite Action's script via `env:` variables and a `while read` loop,
+  not interpolated directly into the shell script the way the pre-existing
+  `path`/`base`/`head`/`min-score` inputs are -- a pattern containing shell
+  metacharacters would otherwise be run as script rather than treated as
+  data. Worth revisiting whether the older inputs should move to the same
+  approach, but that's a pre-existing pattern this change didn't introduce,
+  so left alone for now rather than expanding this PR's scope.
+
 ## [0.7.0] - 2026-07-21
 
 ### Added

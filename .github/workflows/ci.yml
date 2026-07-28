@@ -84,3 +84,25 @@ jobs:
         with:
           base: HEAD~1
           min-score: "50"
+
+      - name: Create a trivial change to a file matched by an ignore pattern
+        # Exercises the `ignore` input added alongside this job's original
+        # coverage of `base`/`head`/`min-score` -- --ignore and --weight
+        # shipped as CLI/library features in 0.4.0 and 0.6.0 but were never
+        # wired into action.yml until now, so this was untested exactly like
+        # the composite action itself was before the test-action job existed.
+        run: |
+          printf '# another trivial comment\n' > ignored_test_file.py
+          git add ignored_test_file.py
+          git commit -m "trivial change to a file the next step ignores"
+
+      - name: Run action with the trivial file excluded via ignore (expect success)
+        # Without `ignore`, this min-score gate would fail the same way the
+        # earlier trivial-commit step did -- passing here is only correct
+        # because the ignored file is excluded from the score, not scored
+        # and happening to pass.
+        uses: ./
+        with:
+          base: HEAD~1
+          min-score: "50"
+          ignore: "ignored_test_file.py"

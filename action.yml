@@ -22,6 +22,18 @@ inputs:
     description: "Fail the job if the overall score (0-100) is below this. Leave unset to only report."
     required: false
     default: ""
+  ignore:
+    description: "Newline-separated gitignore-style patterns for paths to exclude from scoring entirely, e.g. a multi-line block with one pattern per line. Same as repeating --ignore on the CLI."
+    required: false
+    default: ""
+  weight:
+    description: "Newline-separated PATTERN=NUMBER pairs controlling how much matching paths count toward the overall score, one per line, e.g. '*.md=0.3'. Same as repeating --weight on the CLI."
+    required: false
+    default: ""
+  jobs:
+    description: "Score up to this many files concurrently. Leave unset to use diffmeter's default."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -37,6 +49,9 @@ runs:
 
     - name: Run diffmeter
       shell: bash
+      env:
+        DIFFMETER_IGNORE: ${{ inputs.ignore }}
+        DIFFMETER_WEIGHT: ${{ inputs.weight }}
       run: |
         set -e
         args=("${{ inputs.path }}" "--base" "${{ inputs.base }}")
@@ -46,4 +61,17 @@ runs:
         if [ -n "${{ inputs.min-score }}" ]; then
           args+=("--min-score" "${{ inputs.min-score }}")
         fi
+        if [ -n "${{ inputs.jobs }}" ]; then
+          args+=("--jobs" "${{ inputs.jobs }}")
+        fi
+        # Newline-separated inputs, one pattern per line -- read via env vars
+        # (not `${{ inputs.x }}` interpolated straight into the loop) so a
+        # pattern containing shell-special characters can't be interpreted
+        # as script rather than data.
+        while IFS= read -r pattern; do
+          [ -n "$pattern" ] && args+=("--ignore" "$pattern")
+        done <<< "$DIFFMETER_IGNORE"
+        while IFS= read -r pair; do
+          [ -n "$pair" ] && args+=("--weight" "$pair")
+        done <<< "$DIFFMETER_WEIGHT"
         diffmeter score "${args[@]}"

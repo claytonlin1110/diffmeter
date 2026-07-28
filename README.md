@@ -193,6 +193,22 @@ jobs:
           min-score: 30
 ```
 
+`ignore` and `weight` (see below) are also available as action inputs, one
+pattern per line:
+
+```yaml
+      - uses: claytonlin1110/diffmeter@v0.2.0
+        with:
+          base: origin/${{ github.base_ref }}
+          min-score: 30
+          ignore: |
+            *.lock
+            dist/**
+          weight: |
+            *.md=0.3
+            tests/**=0.5
+```
+
 Or without the action, in any CI system:
 
 ```yaml
