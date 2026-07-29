@@ -6,10 +6,12 @@ from unittest.mock import patch
 
 import pytest
 
+from diffmeter.config import ConfigError, build_matcher, build_weight_matchers
 from diffmeter.github_pr import (
     GitHubError,
     PullRequestRef,
     _urlopen_with_retry,
+    fetch_pr_config,
     parse_pr_reference,
     score_pull_request,
 )
@@ -60,6 +62,13 @@ def _fake_urlopen(routes):
         for prefix, payload in routes.items():
             if url.startswith(prefix):
                 return _FakeResponse(payload)
+        # score_pull_request always fetches .diffmeter.toml from the PR's
+        # base commit now; tests that don't care about config loading
+        # shouldn't have to route it explicitly -- a 404 (no config file,
+        # the normal case for most repos) is the right default rather than
+        # an AssertionError for an "unexpected" URL that's actually expected.
+        if url.endswith("/.diffmeter.toml"):
+            raise _http_error(404)
         raise AssertionError(f"unexpected URL requested: {url}")
 
     return _urlopen
@@ -220,6 +229,135 @@ def test_score_pull_request_skips_fetching_blobs_for_ignored_files():
     assert by_path["package-lock.json"].score is None
     assert by_path["app.py"].score == 100.0
     assert result.overall_score == 100.0
+
+
+def test_fetch_pr_config_returns_empty_when_file_absent():
+    ref = PullRequestRef("acme", "widgets", 20)
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen({})):
+        config = fetch_pr_config(ref, "base123")
+    assert config.ignore == ()
+    assert config.weights == {}
+
+
+def test_fetch_pr_config_parses_ignore_and_weights():
+    ref = PullRequestRef("acme", "widgets", 21)
+    routes = {
+        "https://raw.githubusercontent.com/acme/widgets/base123/.diffmeter.toml": (
+            b'ignore = ["*.lock"]\n[weights]\n"*.md" = 0.5\n'
+        ),
+    }
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen(routes)):
+        config = fetch_pr_config(ref, "base123")
+    assert config.ignore == ("*.lock",)
+    assert config.weights == {"*.md": 0.5}
+
+
+def test_fetch_pr_config_raises_config_error_on_invalid_toml():
+    ref = PullRequestRef("acme", "widgets", 22)
+    routes = {
+        "https://raw.githubusercontent.com/acme/widgets/base123/.diffmeter.toml": b"not [ valid toml\n",
+    }
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen(routes)):
+        with pytest.raises(ConfigError):
+            fetch_pr_config(ref, "base123")
+
+
+def test_score_pull_request_loads_diffmeter_toml_from_base_commit():
+    ref = PullRequestRef("acme", "widgets", 23)
+    pr_payload = json.dumps({"base": {"sha": "b"}, "head": {"sha": "h"}}).encode()
+    files_payload = json.dumps(
+        [
+            {"filename": "app.py", "status": "modified", "previous_filename": None},
+            {"filename": "package-lock.json", "status": "modified", "previous_filename": None},
+        ]
+    ).encode()
+    routes = {
+        "https://api.github.com/repos/acme/widgets/pulls/23/files": files_payload,
+        "https://api.github.com/repos/acme/widgets/pulls/23": pr_payload,
+        "https://raw.githubusercontent.com/acme/widgets/b/.diffmeter.toml": b'ignore = ["package-lock.json"]\n',
+        "https://raw.githubusercontent.com/acme/widgets/b/app.py": b"x = 1\n",
+        "https://raw.githubusercontent.com/acme/widgets/h/app.py": b"x = 2\n",
+        # deliberately no route for package-lock.json's blob -- if the ignore
+        # pattern from .diffmeter.toml isn't honored, _fake_urlopen raises
+        # AssertionError trying to fetch it
+    }
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen(routes)):
+        result = score_pull_request(ref)
+
+    by_path = {f.path: f for f in result.files}
+    assert by_path["package-lock.json"].ignored is True
+    assert by_path["app.py"].score == 100.0
+
+
+def test_score_pull_request_ignores_diffmeter_toml_at_head_not_base():
+    # The whole point of reading base rather than head: a PR that edits
+    # .diffmeter.toml to exempt itself from scoring must not have that
+    # edit take effect for the PR that introduces it.
+    ref = PullRequestRef("acme", "widgets", 24)
+    pr_payload = json.dumps({"base": {"sha": "b"}, "head": {"sha": "h"}}).encode()
+    files_payload = json.dumps(
+        [{"filename": "app.py", "status": "modified", "previous_filename": None}]
+    ).encode()
+    routes = {
+        "https://api.github.com/repos/acme/widgets/pulls/24/files": files_payload,
+        "https://api.github.com/repos/acme/widgets/pulls/24": pr_payload,
+        # base has no config (404 default); head's ignore list must be ignored
+        "https://raw.githubusercontent.com/acme/widgets/h/.diffmeter.toml": b'ignore = ["app.py"]\n',
+        "https://raw.githubusercontent.com/acme/widgets/b/app.py": b"x = 1\n",
+        "https://raw.githubusercontent.com/acme/widgets/h/app.py": b"x = 2\n",
+    }
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen(routes)):
+        result = score_pull_request(ref)
+
+    assert result.files[0].ignored is False
+    assert result.files[0].score == 100.0
+
+
+def test_score_pull_request_cli_weight_overrides_config_weight():
+    ref = PullRequestRef("acme", "widgets", 25)
+    pr_payload = json.dumps({"base": {"sha": "b"}, "head": {"sha": "h"}}).encode()
+    files_payload = json.dumps(
+        [{"filename": "README.md", "status": "modified", "previous_filename": None}]
+    ).encode()
+    routes = {
+        "https://api.github.com/repos/acme/widgets/pulls/25/files": files_payload,
+        "https://api.github.com/repos/acme/widgets/pulls/25": pr_payload,
+        "https://raw.githubusercontent.com/acme/widgets/b/.diffmeter.toml": (
+            b'[weights]\n"*.md" = 0.5\n'
+        ),
+        "https://raw.githubusercontent.com/acme/widgets/b/README.md": b"old\n",
+        "https://raw.githubusercontent.com/acme/widgets/h/README.md": b"new\n",
+    }
+    cli_weight_matchers = build_weight_matchers([("*.md", 0.9)])
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen(routes)):
+        result = score_pull_request(ref, weight_matchers=cli_weight_matchers)
+
+    assert result.files[0].weight == 0.9
+
+
+def test_score_pull_request_cli_ignore_and_config_ignore_both_apply():
+    ref = PullRequestRef("acme", "widgets", 26)
+    pr_payload = json.dumps({"base": {"sha": "b"}, "head": {"sha": "h"}}).encode()
+    files_payload = json.dumps(
+        [
+            {"filename": "config_excluded.lock", "status": "modified", "previous_filename": None},
+            {"filename": "cli_excluded.log", "status": "modified", "previous_filename": None},
+        ]
+    ).encode()
+    routes = {
+        "https://api.github.com/repos/acme/widgets/pulls/26/files": files_payload,
+        "https://api.github.com/repos/acme/widgets/pulls/26": pr_payload,
+        "https://raw.githubusercontent.com/acme/widgets/b/.diffmeter.toml": b'ignore = ["*.lock"]\n',
+        # no blob routes for either file -- if either exclusion doesn't
+        # apply, _fake_urlopen raises AssertionError trying to fetch it
+    }
+    cli_matcher = build_matcher(["*.log"])
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen(routes)):
+        result = score_pull_request(ref, matcher=cli_matcher)
+
+    by_path = {f.path: f for f in result.files}
+    assert by_path["config_excluded.lock"].ignored is True
+    assert by_path["cli_excluded.log"].ignored is True
 
 
 def _request():

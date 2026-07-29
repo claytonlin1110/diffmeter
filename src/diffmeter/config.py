@@ -39,31 +39,41 @@ class DiffmeterConfig:
     weights: Mapping[str, float] = field(default_factory=dict)
 
 
+def parse_config(data: bytes, source_label: str = CONFIG_FILENAME) -> DiffmeterConfig:
+    """Parses `.diffmeter.toml` content already read into memory. Shared by
+    `load_config` (a local repo checkout) and `github_pr.fetch_pr_config`
+    (fetched from a PR's *base* commit via the GitHub API, with no local
+    checkout involved -- see that function for why base, not head) so both
+    paths validate identically. `source_label` is only used to point a
+    ConfigError at where the bytes came from."""
+    try:
+        parsed = tomllib.loads(data.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"{source_label}: not valid UTF-8: {exc}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"{source_label}: invalid TOML: {exc}") from exc
+
+    patterns = parsed.get("ignore", [])
+    if not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns):
+        raise ConfigError(f"{source_label}: 'ignore' must be a list of strings")
+
+    weights = parsed.get("weights", {})
+    if not isinstance(weights, dict) or not all(
+        isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+        for k, v in weights.items()
+    ):
+        raise ConfigError(f"{source_label}: 'weights' must be a table of pattern -> non-negative number")
+
+    return DiffmeterConfig(ignore=tuple(patterns), weights={k: float(v) for k, v in weights.items()})
+
+
 def load_config(repo_root: Path) -> DiffmeterConfig:
     """Reads `.diffmeter.toml` from `repo_root` if present. Returns an empty
     config (no ignore patterns, no weights) if the file doesn't exist."""
     config_path = repo_root / CONFIG_FILENAME
     if not config_path.exists():
         return DiffmeterConfig()
-
-    with config_path.open("rb") as f:
-        try:
-            data = tomllib.load(f)
-        except tomllib.TOMLDecodeError as exc:
-            raise ConfigError(f"{config_path}: invalid TOML: {exc}") from exc
-
-    patterns = data.get("ignore", [])
-    if not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns):
-        raise ConfigError(f"{config_path}: 'ignore' must be a list of strings")
-
-    weights = data.get("weights", {})
-    if not isinstance(weights, dict) or not all(
-        isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
-        for k, v in weights.items()
-    ):
-        raise ConfigError(f"{config_path}: 'weights' must be a table of pattern -> non-negative number")
-
-    return DiffmeterConfig(ignore=tuple(patterns), weights={k: float(v) for k, v in weights.items()})
+    return parse_config(config_path.read_bytes(), str(config_path))
 
 
 def build_matcher(patterns: "list[str] | tuple[str, ...]") -> Optional[pathspec.PathSpec]:

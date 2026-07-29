@@ -12,11 +12,20 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import pathspec
 
-from diffmeter.config import WeightMatchers, is_ignored, resolve_weight
+from diffmeter.config import (
+    CONFIG_FILENAME,
+    DiffmeterConfig,
+    WeightMatchers,
+    build_matcher,
+    build_weight_matchers,
+    is_ignored,
+    parse_config,
+    resolve_weight,
+)
 from diffmeter.scorer import DiffScore, _FilePrep, _finalize_diff, _prepare_file
 
 _API_ROOT = "https://api.github.com"
@@ -138,19 +147,40 @@ def _fetch_blob(owner: str, repo: str, sha: str, path: str) -> Optional[bytes]:
         raise GitHubError(f"Could not reach raw.githubusercontent.com: {exc.reason}") from exc
 
 
+def fetch_pr_config(ref: PullRequestRef, sha: str) -> DiffmeterConfig:
+    """Fetches and parses `.diffmeter.toml` from `sha` via the same
+    raw-content mechanism used for every other file's blob, so `--pr` mode
+    can honor a repo's own ignore/weight policy without a local checkout.
+    Returns an empty config if the file doesn't exist at that commit (the
+    normal case for most repos), same as `load_config`'s local behavior.
+
+    Deliberately called with the PR's *base* sha, not its head: fetching
+    from head would let a PR add or edit `.diffmeter.toml` in the same PR
+    to exclude its own changes from scoring -- exactly the kind of gaming
+    this tool exists to catch, and directly relevant given this repo's own
+    `diffmeter-self-score` CI gate uses `--pr`-equivalent scoring on real
+    PRs. Reading from base means the policy that applies is whatever the
+    target branch already had, which a PR can't rewrite to exempt itself.
+    """
+    content = _fetch_blob(ref.owner, ref.repo, sha, CONFIG_FILENAME)
+    if content is None:
+        return DiffmeterConfig()
+    return parse_config(content, f"{ref.owner}/{ref.repo}@{sha}:{CONFIG_FILENAME}")
+
+
 def _prepare_pr_entry(
     ref: PullRequestRef,
     base_sha: str,
     head_sha: str,
     entry: dict,
-    matcher: Optional[pathspec.PathSpec],
+    is_ignored_fn: Callable[[str], bool],
     weight_matchers: Optional[WeightMatchers],
 ) -> _FilePrep:
     status = entry["status"]  # "added" | "removed" | "modified" | "renamed" | "copied" | "changed"
     path = entry["filename"]
     weight = resolve_weight(path, weight_matchers or [])
 
-    if is_ignored(path, matcher):
+    if is_ignored_fn(path):
         return _prepare_file(path, None, None, ignored=True, weight=weight)
 
     previous_path = entry.get("previous_filename") or path
@@ -168,9 +198,18 @@ def score_pull_request(
     """`matcher` (see diffmeter.config.build_matcher) excludes matching paths
     from scoring without fetching their blob content; `weight_matchers`
     (see diffmeter.config.build_weight_matchers) controls how much matching
-    paths count toward the overall score. Neither reads a .diffmeter.toml
-    here -- there's no local checkout to read it from in this mode, so both
-    must be passed in explicitly by the caller.
+    paths count toward the overall score. Both are layered on top of a
+    `.diffmeter.toml` this function fetches itself from the PR's base
+    commit (see `fetch_pr_config`) -- config first, these CLI-style
+    overrides win on a pattern collision, same precedence as local scoring.
+    Unlike local mode, ignore matching here is the union of the config
+    matcher and `matcher` (each evaluated independently, then OR'd) rather
+    than one matcher built from a single concatenated pattern list, so a
+    `matcher` pattern can't use gitignore-style negation (`!pattern`) to
+    un-ignore something the fetched config already excludes -- a real but
+    narrow gap versus local mode's precedence, not expected to matter for
+    the common case of a CLI override adding more exclusions, not undoing
+    the repo's own policy.
 
     Per-file blob fetching and AST classification runs concurrently
     (max_workers threads, default 8): this is dominated by network
@@ -185,14 +224,23 @@ def score_pull_request(
     base_sha = pr["base"]["sha"]
     head_sha = pr["head"]["sha"]
 
+    config = fetch_pr_config(ref, base_sha)
+    config_matcher = build_matcher(list(config.ignore))
+    combined_weight_matchers = build_weight_matchers(list(config.weights.items())) + list(weight_matchers or [])
+
+    def _is_ignored(path: str) -> bool:
+        return is_ignored(path, config_matcher) or is_ignored(path, matcher)
+
     entries = _fetch_pr_files(ref)
     if (max_workers is not None and max_workers <= 1) or len(entries) <= 1:
-        preps = [_prepare_pr_entry(ref, base_sha, head_sha, e, matcher, weight_matchers) for e in entries]
+        preps = [
+            _prepare_pr_entry(ref, base_sha, head_sha, e, _is_ignored, combined_weight_matchers) for e in entries
+        ]
     else:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             preps = list(
                 pool.map(
-                    lambda e: _prepare_pr_entry(ref, base_sha, head_sha, e, matcher, weight_matchers),
+                    lambda e: _prepare_pr_entry(ref, base_sha, head_sha, e, _is_ignored, combined_weight_matchers),
                     entries,
                 )
             )

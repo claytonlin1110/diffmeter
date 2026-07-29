@@ -67,9 +67,11 @@ def main() -> None:
     multiple=True,
     metavar="PATTERN",
     help="Gitignore-style pattern for paths to exclude from scoring entirely (e.g. "
-    "generated files, vendored code). Repeatable. Local scoring also auto-loads "
-    "patterns from a .diffmeter.toml `ignore` list in the repo root; --pr mode only "
-    "sees patterns passed explicitly here, since there's no local checkout to read.",
+    "generated files, vendored code). Repeatable. Both local scoring and --pr mode "
+    "auto-load patterns from a .diffmeter.toml `ignore` list -- local from the repo "
+    "root, --pr mode from the PR's base commit via the GitHub API (deliberately base, "
+    "not head, so a PR can't edit its own way out of being scored); patterns passed "
+    "here are added on top, not a replacement.",
 )
 @click.option(
     "--weight",
@@ -78,9 +80,9 @@ def main() -> None:
     metavar="PATTERN=NUMBER",
     help="Gitignore-style pattern and a multiplier for how much matching files count toward "
     "the overall score, e.g. --weight '*.md=0.5'. Repeatable; later ones win on a pattern "
-    "collision (same precedence as .gitignore). Local scoring also auto-loads a [weights] "
-    "table from .diffmeter.toml (applied before, so CLI values win); --pr mode only sees "
-    "weights passed here.",
+    "collision (same precedence as .gitignore). Both local scoring and --pr mode auto-load "
+    "a [weights] table from .diffmeter.toml the same way --ignore does (applied before, so "
+    "values passed here win).",
 )
 @click.option(
     "--jobs",
