@@ -7,13 +7,20 @@ from diffmeter.config import (
     build_weight_matchers,
     is_ignored,
     load_config,
+    parse_config,
     parse_weight_flag,
     resolve_weight,
 )
-from diffmeter.github_pr import GitHubError, PullRequestRef, parse_pr_reference, score_pull_request
+from diffmeter.github_pr import (
+    GitHubError,
+    PullRequestRef,
+    fetch_pr_config,
+    parse_pr_reference,
+    score_pull_request,
+)
 from diffmeter.scorer import DiffScore, FileScore, Verdict, score_diff, score_file
 
-__version__ = "0.9.6"
+__version__ = "0.9.7"
 
 __all__ = [
     "ConfigError",
@@ -25,8 +32,10 @@ __all__ = [
     "Verdict",
     "build_matcher",
     "build_weight_matchers",
+    "fetch_pr_config",
     "is_ignored",
     "load_config",
+    "parse_config",
     "parse_pr_reference",
     "parse_weight_flag",
     "resolve_weight",

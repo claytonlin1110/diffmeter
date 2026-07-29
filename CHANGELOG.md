@@ -3,6 +3,48 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.7] - 2026-07-29
+
+### Added
+
+- `--pr` mode now auto-loads `.diffmeter.toml` the same way local scoring
+  always has, closing a limitation the README/`--help` text had documented
+  since 0.4.0 ("no checkout to read it from there"). Fetched via the
+  existing raw-content mechanism (`fetch_pr_config`, new public function in
+  `github_pr`), so still no local clone needed.
+  - Deliberately reads the PR's **base** commit, not its head: fetching
+    from head would let a PR add or edit `.diffmeter.toml` in the same PR
+    to exclude its own changes from scoring -- exactly the kind of gaming
+    this tool exists to catch, and directly relevant given this repo's own
+    `diffmeter-self-score` CI gate. A new test
+    (`test_score_pull_request_ignores_diffmeter_toml_at_head_not_base`)
+    locks this in by supplying different config content at each sha and
+    asserting only base's takes effect.
+  - `--ignore`/`--weight` (or `matcher`/`weight_matchers` for library
+    callers) still apply on top of the fetched config, same precedence as
+    local mode: config first, explicit values win on a pattern collision.
+  - Extracted `config.parse_config(data: bytes, source_label: str)` out of
+    `load_config` so both the local-file path and this fetched-bytes path
+    validate identically instead of duplicating the TOML-parsing/validation
+    logic.
+
+### Notes
+
+- One real precedence gap versus local mode, documented rather than
+  silently accepted: local mode builds one `pathspec.PathSpec` from the
+  concatenated config + CLI pattern list, so a CLI pattern can use
+  gitignore-style negation (`!pattern`) to un-ignore something the config
+  excluded. `--pr` mode instead evaluates the config matcher and the CLI
+  matcher independently and ORs the results (`is_ignored(path, config) or
+  is_ignored(path, cli)`), because the CLI-supplied `matcher` arrives at
+  `score_pull_request` as an already-built `PathSpec`, not raw patterns, so
+  there's no single list left to rebuild from. This only differs from local
+  mode's behavior for the narrow case of a CLI pattern trying to negate a
+  config-level exclusion -- not expected to matter for the common case of a
+  CLI override adding more exclusions on top, not undoing the repo's own
+  policy, but a real, known simplification rather than something worth
+  pretending doesn't exist.
+
 ## [0.9.6] - 2026-07-29
 
 ### Fixed

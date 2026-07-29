@@ -138,9 +138,11 @@ Exclude paths with `--ignore` (repeatable, gitignore-style patterns):
 diffmeter score --ignore "*.lock" --ignore "dist/**"
 ```
 
-Or commit a `.diffmeter.toml` in the repo root so it applies automatically
-for local scoring (not `--pr` mode — there's no checkout to read it from
-there, so pass `--ignore` explicitly if you need it with `--pr`):
+Or commit a `.diffmeter.toml` in the repo root so it applies automatically —
+for local scoring, and for `--pr` mode too, which fetches it via the GitHub
+API from the PR's *base* commit rather than needing a local checkout
+(deliberately base, not the PR's own head, so a PR can't edit its own way
+out of being scored — see `--ignore`'s `--help` text for why):
 
 ```toml
 # .diffmeter.toml
@@ -163,8 +165,8 @@ pattern collision, same precedence rule as `.gitignore`):
 diffmeter score --weight "*.md=0.3" --weight "tests/**=0.5"
 ```
 
-Or a `[weights]` table in `.diffmeter.toml` (same `--pr`-mode caveat as
-`ignore` — no checkout to read it from there):
+Or a `[weights]` table in `.diffmeter.toml` (auto-loaded for `--pr` mode too,
+same as `ignore`):
 
 ```toml
 # .diffmeter.toml
