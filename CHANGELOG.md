@@ -3,6 +3,36 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.8] - 2026-07-29
+
+### Changed
+
+- Auto-merge is now path-scoped, not blanket: passing every required check
+  is necessary but no longer sufficient. `enable-auto-merge` (`pr-policy.yml`)
+  now also requires every changed file to match an allowlist (`tests/**`,
+  `*.md`, `.github/ISSUE_TEMPLATE/**`, `.github/PULL_REQUEST_TEMPLATE.md`).
+  A PR touching anything else -- `src/diffmeter/**`, `action.yml`,
+  `.github/workflows/**`, `pyproject.toml` -- always needs a maintainer to
+  click merge, no matter how cleanly it passes checks; the job leaves a
+  one-time comment explaining why instead of silently doing nothing.
+  `close-on-failure`/`close-stale-prs` are unaffected and still apply
+  uniformly: failing checks are an objective bar every PR must clear
+  either way, the allowlist only changes whether *passing* is enough to
+  merge unattended.
+
+### Notes
+
+- Motivated by a direct steer, not a discovered bug: objective checks can
+  confirm a change is substantive and tested, not that it's the *right*
+  change, and "merge anything that passes CI" turned out to be an
+  uncomfortable policy to actually run once it was live and working (see
+  0.9.6's PR #10 test) -- CI passing says nothing about whether a change to
+  real application logic, the CI/CD pipeline itself, or dependencies is one
+  a maintainer actually wants. This repo's own `.github/workflows/**` isn't
+  on the allowlist for exactly that reason: a PR that could modify its own
+  merge gate and then have that gate wave it through unattended would be a
+  real supply-chain hole, not a hypothetical one.
+
 ## [0.9.7] - 2026-07-29
 
 ### Added
