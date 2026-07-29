@@ -27,18 +27,27 @@ jobs:
     steps:
       - name: Enable auto-merge for this PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN structurally cannot call the enablePullRequestAutoMerge
+          # GraphQL mutation -- confirmed the hard way: it failed with
+          # "Resource not accessible by integration" even after granting
+          # pull-requests: write in this workflow's `permissions:` block AND
+          # enabling the repo's "Allow GitHub Actions to create and approve
+          # pull requests" setting. GitHub restricts that specific mutation to
+          # real user-associated tokens, not the workflow-default token, no
+          # matter what it's granted. PR_AUTOMERGE_TOKEN is a fine-grained PAT
+          # (pull-requests: read/write, scoped to only this repo) added as a
+          # repo secret for exactly this reason.
+          GH_TOKEN: ${{ secrets.PR_AUTOMERGE_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
-          # Fork PRs get a read-only GITHUB_TOKEN by GitHub's own design,
-          # regardless of the `permissions:` block above -- deliberately
-          # not something this workflow can (or should try to) work around,
-          # since doing so would let an untrusted PR grant itself merge
-          # rights. This only succeeds for same-repo PRs today; a fork PR
-          # needs a maintainer to run `gh pr merge --auto` by hand, or a
-          # future bot with its own PAT to take over this step.
+          # A PAT stored as a repo secret is still never exposed to a
+          # `pull_request`-triggered run from a fork -- GitHub withholds all
+          # secrets from fork PRs on this event type, precisely to stop an
+          # untrusted PR from exfiltrating one or using it to grant itself
+          # merge rights. So this still only succeeds for same-repo PRs; a
+          # fork PR needs a maintainer to run `gh pr merge --auto` by hand.
           gh pr merge --auto --squash "$PR_URL" \
-            || echo "::warning::Could not enable auto-merge automatically (likely a fork PR without write access to GITHUB_TOKEN). A maintainer must run 'gh pr merge --auto' manually for this PR."
+            || echo "::warning::Could not enable auto-merge automatically (likely a fork PR, which never receives PR_AUTOMERGE_TOKEN; or the secret is missing/misscoped). A maintainer must run 'gh pr merge --auto' manually for this PR."
 
   close-stale-prs:
     # The other half of "no maintainer discretion": a PR that hasn't merged

@@ -78,27 +78,43 @@ read of it. Every check below runs in `.github/workflows/ci.yml` /
 Once every job above succeeds, `pr-policy.yml` enables GitHub's native
 auto-merge on the PR — it doesn't merge immediately, it just tells GitHub to
 merge once required status checks are green, which is what actually
-performs the merge.
+performs the merge. This step runs as `PR_AUTOMERGE_TOKEN`, a fine-grained
+PAT scoped to pull-requests read/write on this repo only, not the
+workflow's default `GITHUB_TOKEN` — confirmed the hard way, not assumed:
+`GITHUB_TOKEN` cannot call the `enablePullRequestAutoMerge` GraphQL mutation
+at all, even with `pull-requests: write` granted in the workflow and the
+repo's "Allow GitHub Actions to create and approve pull requests" setting
+turned on. GitHub restricts that specific mutation to a real
+user-associated token regardless of what a workflow-default token is
+granted, so a PAT is the only way to make this step genuinely unattended.
 
 The reject side is symmetric and immediate, not a grace period: if
 `required-checks` concludes with a failure, `close-on-failure`
 (`ci.yml`) closes the PR and comments why, right then — no chance to push a
 follow-up fix to the same PR, since there's no maintainer discretion to
 appeal to on either side of this policy. Open a new PR once it's fixed.
-`close-stale-prs` (`pr-policy.yml`, daily) is the backstop for what
-`close-on-failure` can't catch: a check that never reaches a conclusive
-result (stuck, cancelled, infra flake) closes after 7 days stale + 3 days
-grace instead of sitting open indefinitely.
+This step *does* use `GITHUB_TOKEN` successfully — closing/commenting on a
+PR isn't restricted the way auto-merge-enabling is. `close-stale-prs`
+(`pr-policy.yml`, daily) is the backstop for what `close-on-failure` can't
+catch: a check that never reaches a conclusive result (stuck, cancelled,
+infra flake) closes after 7 days stale + 3 days grace instead of sitting
+open indefinitely.
 
-**A known limitation, not a design choice being hidden:** GitHub gives a PR
-opened from a fork a read-only `GITHUB_TOKEN` by design, so neither
-`enable-auto-merge` nor `close-on-failure` can act on a fork PR — only a
-maintainer running `gh pr merge --auto` / `gh pr close` by hand (or a future
-bot with its own PAT) can; a failing fork PR falls through to the 10-day
-stale close instead. This isn't a workaround-able gap: letting an untrusted
-PR grant itself merge (or immunity from closing) is exactly the
-vulnerability class GitHub's token scoping exists to prevent, so this
-project isn't going to try to route around it.
+**A known limitation, not a design choice being hidden:** neither side of
+this policy can act on a PR opened from a fork. `enable-auto-merge`
+can't, because GitHub withholds every repo secret — not just
+`GITHUB_TOKEN` — from a `pull_request`-triggered run opened from a fork,
+so `PR_AUTOMERGE_TOKEN` is simply absent there. `close-on-failure` can't
+either, for a related but distinct reason: `GITHUB_TOKEN` itself is
+downgraded to read-only for a fork-triggered `pull_request` run,
+regardless of the `permissions:` block a workflow declares, so `gh pr
+close`/`gh pr comment` fail the same way `gh pr merge` would. A fork PR
+falls through to a maintainer running the equivalent commands by hand, or
+the 10-day stale close if no one does. Neither is a workaround-able gap:
+letting an untrusted PR write to the repo, close itself, or grant itself
+merge rights is exactly the vulnerability class GitHub's token/secret
+scoping for forks exists to prevent, so this project isn't going to try to
+route around it.
 
 ## Roadmap / known gaps
 

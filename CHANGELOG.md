@@ -3,6 +3,34 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.4] - 2026-07-29
+
+### Fixed
+
+- `enable-auto-merge` never actually worked: it always failed with
+  `GraphQL: Resource not accessible by integration
+  (enablePullRequestAutoMerge)`, silently swallowed by its own `||`
+  fallback so the job still reported success. Every PR that "auto-merged"
+  so far (#1-#4) was actually merged by a human running `gh pr merge`
+  themselves, not by the workflow. Root cause, confirmed rather than
+  guessed at: `GITHUB_TOKEN` cannot call `enablePullRequestAutoMerge` at
+  all, regardless of `permissions:` grants or the repo's "Allow GitHub
+  Actions to create and approve pull requests" setting (tried both before
+  concluding this). Fixed by switching that one step to
+  `PR_AUTOMERGE_TOKEN`, a fine-grained PAT (pull-requests read/write,
+  scoped to this repo only) added as a repo secret. `close-on-failure`
+  and `close-stale-prs` are unaffected -- closing/commenting on a PR isn't
+  restricted the same way, and both already worked on `GITHUB_TOKEN`.
+
+### Notes
+
+- Correcting CONTRIBUTING.md's earlier claim that a fork PR only affects
+  the merge side: `close-on-failure` can't act on a fork PR either --
+  `GITHUB_TOKEN` is downgraded to read-only for a fork-triggered
+  `pull_request` run regardless of declared `permissions:`, which was
+  asserted without checking when `close-on-failure` shipped in 0.9.3 and
+  is corrected here instead of left standing.
+
 ## [0.9.3] - 2026-07-29
 
 ### Added
