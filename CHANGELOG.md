@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.2] - 2026-07-29
+
+### Fixed
+
+- Every CI run since this repo started using `actions/checkout` and
+  `actions/setup-python` has carried a "Node.js 20 is deprecated" warning
+  annotation -- both actions still declared `using: node20` while GitHub's
+  hosted runners now force Node 24 regardless. Bumped `actions/checkout`
+  v4 -> v7 and `actions/setup-python` v5 -> v7 across `ci.yml` and
+  `action.yml`; both now declare `using: node24` upstream, confirmed by
+  reading their released `action.yml` directly rather than assuming a
+  major bump would fix it.
+
 ## [0.9.1] - 2026-07-28
 
 ### Changed
