@@ -1,9 +1,14 @@
 name: PR merge policy
 
 # Enforces diffmeter's objective merge/close criteria (see CONTRIBUTING.md):
-# a PR merges itself once every required check in ci.yml passes, and closes
-# itself if it never does within a fixed window. Neither direction involves
-# a maintainer reading the PR and making a judgment call.
+# a PR merges itself once every required check in ci.yml passes AND it only
+# touches paths on the auto-merge allowlist below, and closes itself if
+# checks never pass within a fixed window regardless of what it touches.
+# Passing checks is necessary but not sufficient for auto-merge -- checks
+# can confirm a change is substantive and tested, not that it's the *right*
+# change, so anything touching real application code, the composite Action,
+# CI/CD itself, or packaging/dependency config always waits for a human to
+# click merge, no matter how clean its CI run is.
 
 on:
   pull_request:
@@ -25,7 +30,37 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
+      - name: Check whether this PR only touches auto-merge-eligible paths
+        id: eligibility
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # Auto-merge allowlist: tests, docs, and issue/PR templates only.
+          # Everything else -- src/diffmeter/** (the actual library/CLI),
+          # action.yml (the external-facing composite Action contract),
+          # .github/workflows/** (CI/CD itself -- letting a PR modify its
+          # own gate and then have that gate auto-merge it would be a real
+          # supply-chain hole, not a hypothetical one), and pyproject.toml
+          # (dependencies/packaging) -- requires a human to click merge,
+          # regardless of how clean the CI run is. This is a read (listing
+          # files), so plain GITHUB_TOKEN is enough -- no PAT needed here.
+          eligible=true
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            case "$file" in
+              tests/*|*.md|.github/ISSUE_TEMPLATE/*|.github/PULL_REQUEST_TEMPLATE.md)
+                ;;
+              *)
+                echo "Not eligible for auto-merge: touches '$file', outside the allowlist."
+                eligible=false
+                ;;
+            esac
+          done < <(gh pr view "$PR_URL" --json files --jq '.files[].path')
+          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+
       - name: Enable auto-merge for this PR
+        if: steps.eligibility.outputs.eligible == 'true'
         env:
           # GITHUB_TOKEN structurally cannot call the enablePullRequestAutoMerge
           # GraphQL mutation -- confirmed the hard way: it failed with
@@ -48,6 +83,21 @@ jobs:
           # fork PR needs a maintainer to run `gh pr merge --auto` by hand.
           gh pr merge --auto --squash "$PR_URL" \
             || echo "::warning::Could not enable auto-merge automatically (likely a fork PR, which never receives PR_AUTOMERGE_TOKEN; or the secret is missing/misscoped). A maintainer must run 'gh pr merge --auto' manually for this PR."
+
+      - name: Note that this PR needs manual review instead
+        if: steps.eligibility.outputs.eligible != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # This job re-runs on every push (synchronize), so guard against
+          # leaving a duplicate comment each time -- only post once per PR.
+          already_noted=$(gh pr view "$PR_URL" --json comments \
+            --jq '[.comments[].body | select(contains("outside the auto-merge allowlist"))] | length')
+          if [ "$already_noted" = "0" ]; then
+            gh pr comment "$PR_URL" --body "This PR touches paths outside the auto-merge allowlist (tests/, *.md, issue/PR templates), so it needs a maintainer to merge it by hand even once checks pass -- see CONTRIBUTING.md's \"Objective merge criteria\" section." \
+              || echo "::warning::Could not comment (likely a fork PR without write access to GITHUB_TOKEN)."
+          fi
 
   close-stale-prs:
     # The other half of "no maintainer discretion": a PR that hasn't merged

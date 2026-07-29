@@ -75,24 +75,46 @@ read of it. Every check below runs in `.github/workflows/ci.yml` /
 - The composite Action (`test-action` job) still actually runs, not just
   parses as valid YAML.
 
-Once every job above succeeds, `pr-policy.yml` enables GitHub's native
-auto-merge on the PR — it doesn't merge immediately, it just tells GitHub to
-merge once required status checks are green, which is what actually
-performs the merge. This step runs as `PR_AUTOMERGE_TOKEN`, a fine-grained
-PAT scoped to pull-requests read/write on this repo only, not the
-workflow's default `GITHUB_TOKEN` — confirmed the hard way, not assumed:
-`GITHUB_TOKEN` cannot call the `enablePullRequestAutoMerge` GraphQL mutation
-at all, even with `pull-requests: write` granted in the workflow and the
-repo's "Allow GitHub Actions to create and approve pull requests" setting
-turned on. GitHub restricts that specific mutation to a real
-user-associated token regardless of what a workflow-default token is
-granted, so a PAT is the only way to make this step genuinely unattended.
+Passing every job above is **necessary but not sufficient** for auto-merge.
+Objective checks can confirm a change is substantive and tested; they can't
+confirm it's the *right* change, so `pr-policy.yml` also requires every
+changed file to match the auto-merge allowlist:
 
-The reject side is symmetric and immediate, not a grace period: if
-`required-checks` concludes with a failure, `close-on-failure`
-(`ci.yml`) closes the PR and comments why, right then — no chance to push a
-follow-up fix to the same PR, since there's no maintainer discretion to
-appeal to on either side of this policy. Open a new PR once it's fixed.
+- `tests/**`
+- `*.md` (README, CONTRIBUTING, CHANGELOG)
+- `.github/ISSUE_TEMPLATE/**`, `.github/PULL_REQUEST_TEMPLATE.md`
+
+A PR touching anything else — `src/diffmeter/**` (the actual library/CLI),
+`action.yml` (the external-facing composite Action contract),
+`.github/workflows/**` (letting a PR modify its own gate and then have that
+gate auto-merge it would be a real supply-chain hole), or `pyproject.toml`
+(dependencies/packaging) — always needs a maintainer to click merge by
+hand, no matter how cleanly its checks pass. `enable-auto-merge` comments
+on an ineligible PR explaining this, once, rather than silently doing
+nothing.
+
+Once every job above succeeds *and* the path check passes, `pr-policy.yml`
+enables GitHub's native auto-merge on the PR — it doesn't merge
+immediately, it just tells GitHub to merge once required status checks are
+green, which is what actually performs the merge. This step runs as
+`PR_AUTOMERGE_TOKEN`, a fine-grained PAT scoped to pull-requests
+read/write on this repo only, not the workflow's default `GITHUB_TOKEN` —
+confirmed the hard way, not assumed: `GITHUB_TOKEN` cannot call the
+`enablePullRequestAutoMerge` GraphQL mutation at all, even with
+`pull-requests: write` granted in the workflow and the repo's "Allow
+GitHub Actions to create and approve pull requests" setting turned on.
+GitHub restricts that specific mutation to a real user-associated token
+regardless of what a workflow-default token is granted, so a PAT is the
+only way to make this step genuinely unattended.
+
+The reject side has no equivalent carve-out and applies uniformly regardless
+of what a PR touches: if `required-checks` concludes with a failure,
+`close-on-failure` (`ci.yml`) closes the PR and comments why, right
+then — no chance to push a follow-up fix to the same PR, no maintainer
+discretion to appeal to. Open a new PR once it's fixed. Failing checks are
+an objective bar every PR must clear either way; the allowlist only affects
+whether *passing* is enough to merge unattended, not whether *failing* gets
+you a grace period.
 This step *does* use `GITHUB_TOKEN` successfully — closing/commenting on a
 PR isn't restricted the way auto-merge-enabling is. `close-stale-prs`
 (`pr-policy.yml`, daily) is the backstop for what `close-on-failure` can't
