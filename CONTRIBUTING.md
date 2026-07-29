@@ -78,18 +78,27 @@ read of it. Every check below runs in `.github/workflows/ci.yml` /
 Once every job above succeeds, `pr-policy.yml` enables GitHub's native
 auto-merge on the PR — it doesn't merge immediately, it just tells GitHub to
 merge once required status checks are green, which is what actually
-performs the merge. A PR that never gets there closes automatically after 7
-days stale + 3 days grace (`close-stale-prs` in `pr-policy.yml`), rather than
-sitting open for a human to triage.
+performs the merge.
+
+The reject side is symmetric and immediate, not a grace period: if
+`required-checks` concludes with a failure, `close-on-failure`
+(`ci.yml`) closes the PR and comments why, right then — no chance to push a
+follow-up fix to the same PR, since there's no maintainer discretion to
+appeal to on either side of this policy. Open a new PR once it's fixed.
+`close-stale-prs` (`pr-policy.yml`, daily) is the backstop for what
+`close-on-failure` can't catch: a check that never reaches a conclusive
+result (stuck, cancelled, infra flake) closes after 7 days stale + 3 days
+grace instead of sitting open indefinitely.
 
 **A known limitation, not a design choice being hidden:** GitHub gives a PR
-opened from a fork a read-only `GITHUB_TOKEN` by design, so
-`enable-auto-merge` can't set the auto-merge flag on a fork PR — only a
-maintainer running `gh pr merge --auto` by hand (or a future bot with its
-own PAT) can. This isn't a workaround-able gap: letting an untrusted PR
-grant itself merge rights is exactly the vulnerability class GitHub's token
-scoping exists to prevent, so this project isn't going to try to route
-around it.
+opened from a fork a read-only `GITHUB_TOKEN` by design, so neither
+`enable-auto-merge` nor `close-on-failure` can act on a fork PR — only a
+maintainer running `gh pr merge --auto` / `gh pr close` by hand (or a future
+bot with its own PAT) can; a failing fork PR falls through to the 10-day
+stale close instead. This isn't a workaround-able gap: letting an untrusted
+PR grant itself merge (or immunity from closing) is exactly the
+vulnerability class GitHub's token scoping exists to prevent, so this
+project isn't going to try to route around it.
 
 ## Roadmap / known gaps
 

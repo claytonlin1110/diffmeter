@@ -75,6 +75,36 @@ jobs:
             fi
           done
 
+  close-on-failure:
+    # Objective close criterion (see CONTRIBUTING.md): a PR whose
+    # required-checks fails closes immediately -- no grace period, matching
+    # the merge side's "no maintainer discretion" symmetrically on the
+    # reject side. pr-policy.yml's close-stale-prs (10-day inactivity) is
+    # the backstop for the cases this can't catch: a check that never
+    # reaches a conclusive result (stuck/cancelled), or a fork PR (see
+    # below).
+    if: github.event_name == 'pull_request' && needs['required-checks'].result == 'failure'
+    needs: [required-checks]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Close this PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # Fork PRs get a read-only GITHUB_TOKEN by GitHub's own design,
+          # same limitation as pr-policy.yml's enable-auto-merge and for
+          # the same reason -- not something this workflow tries to route
+          # around. Falls through to the warning below instead of failing
+          # the job, since a failed close attempt shouldn't itself need
+          # triage.
+          gh pr comment "$PR_URL" --body "Closing automatically: this PR did not pass diffmeter's required checks (tests, the coverage floor, and diffmeter's own --min-score gate on the diff). Push a fix and open a new PR -- see CONTRIBUTING.md's \"Objective merge criteria\" section." \
+            || echo "::warning::Could not comment on the PR (likely a fork PR without write access to GITHUB_TOKEN)."
+          gh pr close "$PR_URL" \
+            || echo "::warning::Could not close automatically (likely a fork PR without write access to GITHUB_TOKEN). A maintainer must close this PR manually, or it will close via the 10-day stale fallback."
+
   test-action:
     # Exercises action.yml for real via `uses: ./` -- this was shipped in
     # v0.2.0 and, until now, only ever validated as syntactically-correct
