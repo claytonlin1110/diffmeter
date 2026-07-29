@@ -3,6 +3,30 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.3] - 2026-07-29
+
+### Added
+
+- The close side of the objective merge/close policy is now immediate, not
+  just the 10-day stale fallback: a new `close-on-failure` job in
+  `ci.yml` closes a PR (with an explanatory comment) the moment
+  `required-checks` concludes with a failure — no grace period, no chance
+  to push a follow-up fix to the same PR, matching the merge side's "no
+  maintainer discretion" symmetrically. `close-stale-prs` in
+  `pr-policy.yml` remains as the backstop for what an immediate close can't
+  catch: a check that never reaches a conclusive result, or a fork PR
+  (same read-only-`GITHUB_TOKEN` limitation as `enable-auto-merge`, and for
+  the same reason — see CONTRIBUTING.md).
+
+### Notes
+
+- Deliberate trade-off, not an oversight: this means a PR gets exactly one
+  shot. Pushing a fix after a failure requires opening a new PR, not
+  amending the closed one. That's a real cost for ordinary iterative
+  development, but it's what "closing is based on objective criteria,"
+  taken literally, actually means rather than being softened into a grace
+  period by default.
+
 ## [0.9.2] - 2026-07-29
 
 ### Fixed
