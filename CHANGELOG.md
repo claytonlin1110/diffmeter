@@ -3,6 +3,29 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.6] - 2026-07-29
+
+### Fixed
+
+- `close-on-failure` (shipped in 0.9.3) never actually fired -- confirmed
+  live, not assumed: a deliberately-failing test PR proved `required-checks`
+  correctly failed, but `close-on-failure` came back `skipped` instead of
+  closing it. Root cause: GitHub Actions implicitly ANDs a `success()`
+  check onto any job's `if:` condition unless it explicitly starts with
+  `always()`/`failure()`/`cancelled()` -- since `close-on-failure`'s only
+  dependency (`required-checks`) had failed, that implicit `success()`
+  short-circuited the job to skipped before the custom condition was even
+  evaluated. Fixed by prefixing the condition with `failure()`.
+
+### Notes
+
+- Same pattern as 0.9.4's `enable-auto-merge` fix: something that looked
+  correct in the YAML and reported a "successful" run had never actually
+  done its job, because nothing had exercised the failing-PR path for
+  real until a deliberate test forced it. Neither gap would have been
+  caught by CI validating its own YAML syntax -- only by watching the
+  actual policy run against a PR designed to fail.
+
 ## [0.9.5] - 2026-07-29
 
 ### Fixed

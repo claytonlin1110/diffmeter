@@ -83,7 +83,14 @@ jobs:
     # the backstop for the cases this can't catch: a check that never
     # reaches a conclusive result (stuck/cancelled), or a fork PR (see
     # below).
-    if: github.event_name == 'pull_request' && needs['required-checks'].result == 'failure'
+    #
+    # `if:` must start with failure() (or always()) -- a plain boolean
+    # expression here gets an implicit success() ANDed onto it by GitHub,
+    # so with required-checks failed this job would silently skip instead
+    # of running, no matter what the rest of the condition says. Confirmed
+    # the hard way: this job never fired on a real failing PR from when it
+    # shipped in 0.9.3 until this exact bug was caught live.
+    if: failure() && github.event_name == 'pull_request' && needs['required-checks'].result == 'failure'
     needs: [required-checks]
     runs-on: ubuntu-latest
     permissions:
