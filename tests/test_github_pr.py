@@ -107,6 +107,37 @@ def test_score_pull_request_scores_across_added_modified_removed_files():
     assert result.overall_score == 100.0
 
 
+def test_score_pull_request_max_workers_zero_does_not_crash():
+    # Regression test for issue #6: ThreadPoolExecutor(max_workers=0) raises
+    # ValueError; the old `max_workers == 1` fast-path only special-cased
+    # exactly 1, not anything <= 1, so max_workers=0 crashed whenever there
+    # was more than one file to score -- same root cause as the equivalent
+    # score_diff test, but score_pull_request has its own independent
+    # `if max_workers == 1 or ...` check to guard.
+    ref = PullRequestRef("acme", "widgets", 9)
+
+    pr_payload = json.dumps({"base": {"sha": "base123"}, "head": {"sha": "head456"}}).encode()
+    files_payload = json.dumps(
+        [
+            {"filename": "a.py", "status": "modified", "previous_filename": None},
+            {"filename": "b.py", "status": "modified", "previous_filename": None},
+        ]
+    ).encode()
+    routes = {
+        "https://api.github.com/repos/acme/widgets/pulls/9/files": files_payload,
+        "https://api.github.com/repos/acme/widgets/pulls/9": pr_payload,
+        "https://raw.githubusercontent.com/acme/widgets/base123/a.py": b"x = 1\n",
+        "https://raw.githubusercontent.com/acme/widgets/head456/a.py": b"x = 2\n",
+        "https://raw.githubusercontent.com/acme/widgets/base123/b.py": b"y = 1\n",
+        "https://raw.githubusercontent.com/acme/widgets/head456/b.py": b"y = 2\n",
+    }
+
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen(routes)):
+        result = score_pull_request(ref, max_workers=0)
+
+    assert result.overall_score == 100.0
+
+
 def test_score_pull_request_handles_trivial_change():
     ref = PullRequestRef("acme", "widgets", 8)
 

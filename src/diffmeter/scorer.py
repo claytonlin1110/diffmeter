@@ -505,7 +505,7 @@ def score_diff(
             return _prepare_file(path, None, None, ignored=True, weight=weight)
         return _prepare_file(path, base_content, head_content, weight=weight)
 
-    if max_workers == 1 or len(pairs) <= 1:
+    if (max_workers is not None and max_workers <= 1) or len(pairs) <= 1:
         preps = [_prep(pair) for pair in pairs]
     else:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:

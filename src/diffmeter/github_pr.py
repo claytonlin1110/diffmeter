@@ -186,7 +186,7 @@ def score_pull_request(
     head_sha = pr["head"]["sha"]
 
     entries = _fetch_pr_files(ref)
-    if max_workers == 1 or len(entries) <= 1:
+    if (max_workers is not None and max_workers <= 1) or len(entries) <= 1:
         preps = [_prepare_pr_entry(ref, base_sha, head_sha, e, matcher, weight_matchers) for e in entries]
     else:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:

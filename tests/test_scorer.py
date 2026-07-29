@@ -120,6 +120,19 @@ def test_score_diff_max_workers_one_matches_default_concurrency_result():
     assert [f.score for f in sequential.files] == [f.score for f in concurrent.files]
 
 
+def test_score_diff_max_workers_zero_does_not_crash():
+    # Regression test for issue #6: ThreadPoolExecutor(max_workers=0) raises
+    # ValueError, and the old `max_workers == 1` fast-path only special-cased
+    # exactly 1, not anything <= 1 -- so 0 (or negative) fell through to the
+    # crashing path whenever there was more than one file to score.
+    pairs = [
+        ("a.py", b"x = 1\n", b"x = 1\n# comment\n"),
+        ("b.py", b"y = 1\n", b"y = 2\n"),
+    ]
+    result = score_diff(pairs, max_workers=0)
+    assert [f.score for f in result.files] == [0.0, 100.0]
+
+
 def test_score_diff_matcher_excludes_file_without_scoring_it():
     pairs = [
         ("a.py", b"x = 1\n", b"x = 2\n"),

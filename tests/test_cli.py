@@ -176,6 +176,24 @@ def test_cli_weight_flag_rejects_invalid_form(repo: Path):
     assert "--weight" in result.output
 
 
+def test_cli_jobs_zero_rejected_cleanly_not_a_crash(repo: Path):
+    # Regression test for issue #6: --jobs 0 used to reach an unguarded
+    # ThreadPoolExecutor(max_workers=0), which raises ValueError -- an
+    # unhandled traceback, not a clean CLI error. Two changed files are
+    # needed to reach that code path at all (with 0 or 1 files, a
+    # `len(files) <= 1` short-circuit routed around it, which is likely why
+    # this went unnoticed). --jobs is now click.IntRange(min=1), so this
+    # should be a normal Click usage error, not an unhandled exception.
+    (repo / "a.py").write_text("def f():\n    return 2\n")
+    (repo / "b.py").write_text("def g():\n    return 3\n")
+    _git(repo, "add", "b.py")
+    runner = CliRunner()
+    result = runner.invoke(main, ["score", str(repo), "--jobs", "0"])
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "--jobs" in result.output
+
+
 def test_cli_loads_weights_from_config_file(repo_with_readme: Path):
     (repo_with_readme / ".diffmeter.toml").write_text('[weights]\n"README.md" = 0\n')
     _git(repo_with_readme, "add", ".diffmeter.toml")
