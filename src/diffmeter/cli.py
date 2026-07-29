@@ -85,7 +85,7 @@ def main() -> None:
 @click.option(
     "--jobs",
     "-j",
-    type=int,
+    type=click.IntRange(min=1),
     default=8,
     show_default=True,
     help="Score up to this many files concurrently. Set to 1 to disable concurrency "

@@ -3,6 +3,24 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.5] - 2026-07-29
+
+### Fixed
+
+- `diffmeter score --jobs 0` (or any non-positive value) crashed with an
+  unhandled `ValueError: max_workers must be greater than 0` traceback
+  instead of a clean CLI error, whenever there was more than one changed
+  file to score -- with 0 or 1 files a `len(...) <= 1` short-circuit
+  happened to route around the bug, which is likely why it went unnoticed.
+  Closes #6. `--jobs` is now `click.IntRange(min=1)`, giving a standard
+  Click usage error instead of a raw traceback. The same root cause (an
+  `== 1` fast-path that only special-cased exactly 1, not anything `<= 1`)
+  also existed in `scorer.score_diff` and `github_pr.score_pull_request`'s
+  `max_workers` parameters -- both public library functions, so a caller
+  passing `max_workers=0` directly hit the identical crash independent of
+  the CLI. Both now treat any `max_workers <= 1` as sequential, same as
+  `max_workers=1` already did.
+
 ## [0.9.4] - 2026-07-29
 
 ### Fixed
