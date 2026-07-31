@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.9] - 2026-07-29
+
+### Fixed
+
+- A PR that started eligible for auto-merge (touching only `tests/`, say)
+  and had auto-merge armed on that push, then got a follow-up commit adding
+  a file outside the allowlist (e.g. `src/diffmeter/`), stayed armed --
+  `enable-auto-merge` never disarmed a previously-set auto-merge flag when
+  eligibility flipped to false on a later push. That would have silently
+  defeated the entire point of path-scoping: the PR could still merge
+  itself once checks passed, despite now touching code outside the
+  allowlist. `enable-auto-merge` now calls `gh pr merge --disable-auto`
+  (via `PR_AUTOMERGE_TOKEN`, the sibling mutation to enabling, same token
+  restriction) the moment a PR is found ineligible, before commenting.
+
 ## [0.9.8] - 2026-07-29
 
 ### Changed

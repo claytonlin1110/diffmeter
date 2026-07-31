@@ -84,12 +84,28 @@ jobs:
           gh pr merge --auto --squash "$PR_URL" \
             || echo "::warning::Could not enable auto-merge automatically (likely a fork PR, which never receives PR_AUTOMERGE_TOKEN; or the secret is missing/misscoped). A maintainer must run 'gh pr merge --auto' manually for this PR."
 
-      - name: Note that this PR needs manual review instead
+      - name: Revoke auto-merge and note that this PR needs manual review
         if: steps.eligibility.outputs.eligible != 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Same PAT as the enable step, not GITHUB_TOKEN: disabling
+          # auto-merge is disablePullRequestAutoMerge, the sibling GraphQL
+          # mutation to enablePullRequestAutoMerge -- both restricted to a
+          # real user-associated token, not the workflow-default one (see
+          # the enable step's comment for how that was confirmed).
+          GH_TOKEN: ${{ secrets.PR_AUTOMERGE_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
+          # Revoke first, unconditionally, before commenting: this job
+          # re-runs on every push, so a PR can start eligible (auto-merge
+          # armed by an earlier push touching only tests/), then a later
+          # push adds a file outside the allowlist. Without this, the
+          # already-armed flag would stay armed and the PR could still
+          # merge itself once checks pass -- silently defeating the entire
+          # point of path-scoping. Harmless no-op if nothing was armed
+          # (the common case), so failures here are swallowed rather than
+          # warned about.
+          gh pr merge --disable-auto "$PR_URL" >/dev/null 2>&1 || true
+
           # This job re-runs on every push (synchronize), so guard against
           # leaving a duplicate comment each time -- only post once per PR.
           already_noted=$(gh pr view "$PR_URL" --json comments \

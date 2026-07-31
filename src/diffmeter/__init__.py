@@ -20,7 +20,7 @@ from diffmeter.github_pr import (
 )
 from diffmeter.scorer import DiffScore, FileScore, Verdict, score_diff, score_file
 
-__version__ = "0.9.8"
+__version__ = "0.9.9"
 
 __all__ = [
     "ConfigError",
