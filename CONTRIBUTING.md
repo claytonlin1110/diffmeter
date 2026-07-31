@@ -93,6 +93,16 @@ hand, no matter how cleanly its checks pass. `enable-auto-merge` comments
 on an ineligible PR explaining this, once, rather than silently doing
 nothing.
 
+Eligibility is re-checked on every push, and a PR can flip from eligible to
+not: it might start out touching only `tests/` (auto-merge armed on that
+push), then a later commit adds a change under `src/diffmeter/`. Nothing
+about GitHub's native auto-merge revokes itself when that happens, so
+`enable-auto-merge` explicitly calls `gh pr merge --disable-auto` the
+moment a PR is found ineligible -- without it, a PR could still merge
+itself on a stale armed flag despite now touching code outside the
+allowlist, which would have quietly defeated the entire point of
+path-scoping.
+
 Once every job above succeeds *and* the path check passes, `pr-policy.yml`
 enables GitHub's native auto-merge on the PR — it doesn't merge
 immediately, it just tells GitHub to merge once required status checks are
